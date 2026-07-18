@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 namespace ProxyTunnel
@@ -45,8 +46,18 @@ namespace ProxyTunnel
 
             GameObject host = new GameObject("ProxyTunnelBootstrap");
             host.AddComponent<ProxyTunnelBootstrap>();
-            host.AddComponent<ProxyTunnelDebugUI>();
+            AttachDebugUiIfAvailable(host);
             DontDestroyOnLoad(host);
+        }
+
+        private static void AttachDebugUiIfAvailable(GameObject host)
+        {
+            Type debugUiType = Type.GetType("ProxyTunnel.ProxyTunnelDebugUI, Assembly-CSharp")
+                ?? Type.GetType("ProxyTunnel.ProxyTunnelDebugUI");
+            if (debugUiType != null && typeof(MonoBehaviour).IsAssignableFrom(debugUiType))
+            {
+                host.AddComponent(debugUiType);
+            }
         }
 
         private void Awake()
