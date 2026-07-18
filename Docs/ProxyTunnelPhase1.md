@@ -89,14 +89,25 @@ callbacks.
 - `stopWithTask=false` lets Android keep the service when the Unity activity is removed
   from recents if the OS permits continued foreground execution.
 - `START_NOT_STICKY` prevents silent restarts without in-memory credentials.
+- Invalid start input, missing credentials, unsupported actions, and permanent
+  authentication failures are terminal configuration/authentication errors. The service
+  clears the persisted user-enabled flag, preserves the final error for Unity, removes the
+  foreground notification, and stops itself instead of leaving an idle foreground service.
 
 ## Authentication and heartbeat flow
 
 For `useTls=false`, the client opens a normal TCP socket.
 
-For `useTls=true`, the client opens an `SSLSocket` using the platform trust store. It does
-not install a permissive trust manager and does not bypass certificate verification.
-Endpoint identification is enabled where the Android API supports it.
+For `useTls=true`, the client first opens a plain socket with the configured connect
+timeout, then wraps it with
+`SSLSocketFactory.createSocket(plainSocket, host, port, true)`. Passing the configured host
+to the platform TLS stack associates the connection with that hostname and enables SNI
+when connecting by DNS name. The client uses the Android platform trust store, enables
+HTTPS endpoint identification where the API supports it, starts the TLS handshake, and
+then explicitly verifies the `SSLSession` with Android's default HTTPS hostname verifier.
+This API 23-compatible explicit verification means a certificate issued for a different
+hostname must fail. The client does not install a permissive trust manager and does not
+bypass certificate verification.
 
 Protocol:
 
@@ -250,3 +261,33 @@ The Stop action fully terminates the socket and service.
 14. No `VpnService` is declared.
 15. No listening socket is opened on the Android device.
 16. No SOCKS5 or traffic-forwarding code exists.
+
+## Blocking-fix validation coverage
+
+These cases should be run on a physical Android device or Android CI environment with the
+Unity Android toolchain available:
+
+1. Valid TLS hostname succeeds:
+   - Run a TLS gateway with a certificate whose SAN matches the hostname entered in the
+     Unity UI.
+   - Start with `Use TLS` enabled.
+   - Expected: TLS handshake succeeds, AUTH succeeds, status becomes Connected.
+2. Wrong-host certificate fails:
+   - Run the TLS gateway with a certificate valid for a different hostname.
+   - Start with `Use TLS` enabled and the unmatched hostname in the Unity UI.
+   - Expected: TLS handshake/session verification fails, no AUTH retry storm occurs, and
+     the token is not logged.
+3. Authentication failure terminates the service:
+   - Start the tunnel with an incorrect token.
+   - Expected: status becomes Disconnected, final error remains readable from Unity,
+     user-enabled persistence is cleared, foreground notification is removed, and the
+     service stops.
+4. Temporary disconnect reconnects:
+   - Start with a correct token and then interrupt Wi-Fi or stop the gateway after a
+     successful connection.
+   - Expected: status becomes Reconnecting, reconnect uses bounded backoff, and restoring
+     network/gateway connectivity returns status to Connected.
+5. Notification Stop terminates immediately:
+   - Start a connected tunnel and press Stop from the persistent notification.
+   - Expected: socket closes, worker/callbacks are released, notification is removed, and
+     service stops without waiting for heartbeat timeout.

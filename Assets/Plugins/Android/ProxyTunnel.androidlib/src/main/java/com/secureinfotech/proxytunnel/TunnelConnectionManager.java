@@ -21,7 +21,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLSession;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
@@ -102,6 +104,19 @@ public final class TunnelConnectionManager {
         }
     }
 
+    public void shutdownAfterTerminalFailure() {
+        stopped.set(true);
+        closeCurrentSocket();
+        unregisterNetworkCallback();
+        synchronized (waitLock) {
+            waitLock.notifyAll();
+        }
+        if (executor != null) {
+            executor.shutdown();
+            executor = null;
+        }
+    }
+
     private void runConnectionLoop() {
         long backoffMs = INITIAL_BACKOFF_MS;
         listener.onStatusChanged(TunnelStatus.CONNECTING);
@@ -152,11 +167,6 @@ public final class TunnelConnectionManager {
         Socket socket = createSocket();
         currentSocket = socket;
 
-        socket.connect(new InetSocketAddress(config.host, config.port), CONNECT_TIMEOUT_MS);
-        if (socket instanceof SSLSocket) {
-            ((SSLSocket) socket).startHandshake();
-        }
-
         InputStream inputStream = socket.getInputStream();
         OutputStream outputStream = socket.getOutputStream();
         socket.setSoTimeout(AUTH_TIMEOUT_MS);
@@ -190,16 +200,50 @@ public final class TunnelConnectionManager {
 
     private Socket createSocket() throws IOException {
         if (!config.useTls) {
-            return new Socket();
+            Socket socket = new Socket();
+            socket.connect(new InetSocketAddress(config.host, config.port), CONNECT_TIMEOUT_MS);
+            return socket;
         }
-        SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
-        SSLSocket socket = (SSLSocket) factory.createSocket();
-        if (Build.VERSION.SDK_INT >= 24) {
-            SSLParameters parameters = socket.getSSLParameters();
-            parameters.setEndpointIdentificationAlgorithm("HTTPS");
-            socket.setSSLParameters(parameters);
+
+        Socket plainSocket = new Socket();
+        SSLSocket tlsSocket = null;
+        try {
+            plainSocket.connect(new InetSocketAddress(config.host, config.port), CONNECT_TIMEOUT_MS);
+
+            SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
+            tlsSocket = (SSLSocket) factory.createSocket(
+                    plainSocket,
+                    config.host,
+                    config.port,
+                    true);
+            if (Build.VERSION.SDK_INT >= 24) {
+                SSLParameters parameters = tlsSocket.getSSLParameters();
+                parameters.setEndpointIdentificationAlgorithm("HTTPS");
+                tlsSocket.setSSLParameters(parameters);
+            }
+            tlsSocket.startHandshake();
+            verifyHostname(tlsSocket);
+            return tlsSocket;
+        } catch (IOException exception) {
+            try {
+                if (tlsSocket != null) {
+                    tlsSocket.close();
+                } else {
+                    plainSocket.close();
+                }
+            } catch (IOException ignored) {
+                // Closing after a failed TLS setup.
+            }
+            throw exception;
         }
-        return socket;
+    }
+
+    private void verifyHostname(SSLSocket socket) throws IOException {
+        SSLSession session = socket.getSession();
+        if (session == null || !HttpsURLConnection.getDefaultHostnameVerifier()
+                .verify(config.host, session)) {
+            throw new IOException("TLS hostname verification failed.");
+        }
     }
 
     private void writeLine(OutputStream outputStream, String line) throws IOException {

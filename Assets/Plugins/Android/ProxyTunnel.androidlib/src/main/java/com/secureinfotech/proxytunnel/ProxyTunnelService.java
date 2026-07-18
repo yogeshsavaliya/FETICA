@@ -60,9 +60,7 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null || intent.getAction() == null) {
-            setStatus(TunnelStatus.DISCONNECTED);
-            setLastError("Tunnel credentials are unavailable. Start the tunnel again from Unity.");
-            updateNotification();
+            stopForTerminalError("Tunnel credentials are unavailable. Start the tunnel again from Unity.");
             return START_NOT_STICKY;
         }
 
@@ -72,8 +70,7 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
         }
 
         if (!ACTION_START.equals(intent.getAction())) {
-            setLastError("Unsupported tunnel service action.");
-            updateNotification();
+            stopForTerminalError("Unsupported tunnel service action.");
             return START_NOT_STICKY;
         }
 
@@ -83,9 +80,7 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
         boolean useTls = intent.getBooleanExtra(EXTRA_USE_TLS, true);
         String validationError = validateStartInput(host, port, token);
         if (validationError != null) {
-            setStatus(TunnelStatus.DISCONNECTED);
-            setLastError(validationError);
-            updateNotification();
+            stopForTerminalError(validationError);
             return START_NOT_STICKY;
         }
 
@@ -143,7 +138,25 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
         setStatus(TunnelStatus.DISCONNECTED);
         setLastError(message);
         TunnelConfig.setUserEnabled(this, false);
+        if (connectionManager != null) {
+            connectionManager.shutdownAfterTerminalFailure();
+            connectionManager = null;
+        }
+        stopForeground(true);
+        stopSelf();
+    }
+
+    private void stopForTerminalError(String message) {
+        TunnelConfig.setUserEnabled(this, false);
+        if (connectionManager != null) {
+            connectionManager.stop();
+            connectionManager = null;
+        }
+        setStatus(TunnelStatus.DISCONNECTED);
+        setLastError(message);
         updateNotification();
+        stopForeground(true);
+        stopSelf();
     }
 
     private void stopTunnel() {
