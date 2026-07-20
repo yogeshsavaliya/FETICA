@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 
 namespace ProxyTunnel
@@ -36,27 +35,35 @@ namespace ProxyTunnel
             set => useTls = value;
         }
 
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void EnsureBootstrapExists()
         {
             if (Instance != null)
             {
+                EnsureDebugUi(Instance.gameObject);
+                return;
+            }
+
+            ProxyTunnelBootstrap sceneBootstrap = FindFirstObjectByType<ProxyTunnelBootstrap>();
+            if (sceneBootstrap != null)
+            {
+                Instance = sceneBootstrap;
+                DontDestroyOnLoad(sceneBootstrap.gameObject);
+                EnsureDebugUi(sceneBootstrap.gameObject);
                 return;
             }
 
             GameObject host = new GameObject("ProxyTunnelBootstrap");
             host.AddComponent<ProxyTunnelBootstrap>();
-            AttachDebugUiIfAvailable(host);
+            EnsureDebugUi(host);
             DontDestroyOnLoad(host);
         }
 
-        private static void AttachDebugUiIfAvailable(GameObject host)
+        private static void EnsureDebugUi(GameObject host)
         {
-            Type debugUiType = Type.GetType("ProxyTunnel.ProxyTunnelDebugUI, Assembly-CSharp")
-                ?? Type.GetType("ProxyTunnel.ProxyTunnelDebugUI");
-            if (debugUiType != null && typeof(MonoBehaviour).IsAssignableFrom(debugUiType))
+            if (host.GetComponent<ProxyTunnelDebugUI>() == null)
             {
-                host.AddComponent(debugUiType);
+                host.AddComponent<ProxyTunnelDebugUI>();
             }
         }
 
