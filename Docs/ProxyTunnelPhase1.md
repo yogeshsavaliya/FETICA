@@ -101,13 +101,14 @@ For `useTls=false`, the client opens a normal TCP socket.
 For `useTls=true`, the client first opens a plain socket with the configured connect
 timeout, then wraps it with
 `SSLSocketFactory.createSocket(plainSocket, host, port, true)`. Passing the configured host
-to the platform TLS stack associates the connection with that hostname and enables SNI
-when connecting by DNS name. The client uses the Android platform trust store, enables
-HTTPS endpoint identification where the API supports it, starts the TLS handshake, and
-then explicitly verifies the `SSLSession` with Android's default HTTPS hostname verifier.
-This API 23-compatible explicit verification means a certificate issued for a different
-hostname must fail. The client does not install a permissive trust manager and does not
-bypass certificate verification.
+to the platform TLS stack associates the connection with that hostname and lets the
+platform send SNI on supported stacks. On Android API 24+ the client also explicitly sets
+SNI for DNS hostnames and enables HTTPS endpoint identification through `SSLParameters`.
+For API 23 compatibility, and as a defense in depth on newer versions, the client starts
+the TLS handshake and then explicitly verifies the `SSLSession` with Android's default
+HTTPS hostname verifier. This means a certificate issued for a different hostname must
+fail. The client uses the Android platform trust store, does not install a permissive
+trust manager, and does not bypass certificate verification.
 
 Protocol:
 

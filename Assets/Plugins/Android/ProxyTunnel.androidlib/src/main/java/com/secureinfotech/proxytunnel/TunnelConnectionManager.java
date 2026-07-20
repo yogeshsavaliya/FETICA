@@ -11,10 +11,13 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -216,11 +219,7 @@ public final class TunnelConnectionManager {
                     config.host,
                     config.port,
                     true);
-            if (Build.VERSION.SDK_INT >= 24) {
-                SSLParameters parameters = tlsSocket.getSSLParameters();
-                parameters.setEndpointIdentificationAlgorithm("HTTPS");
-                tlsSocket.setSSLParameters(parameters);
-            }
+            configureTlsSocket(tlsSocket);
             tlsSocket.startHandshake();
             verifyHostname(tlsSocket);
             return tlsSocket;
@@ -238,11 +237,50 @@ public final class TunnelConnectionManager {
         }
     }
 
+    private void configureTlsSocket(SSLSocket socket) {
+        if (Build.VERSION.SDK_INT < 24) {
+            return;
+        }
+        SSLParameters parameters = socket.getSSLParameters();
+        parameters.setEndpointIdentificationAlgorithm("HTTPS");
+        if (shouldSendSni(config.host)) {
+            setServerNameWithReflection(parameters, config.host);
+        }
+        socket.setSSLParameters(parameters);
+    }
+
     private void verifyHostname(SSLSocket socket) throws IOException {
         SSLSession session = socket.getSession();
         if (session == null || !HttpsURLConnection.getDefaultHostnameVerifier()
                 .verify(config.host, session)) {
             throw new IOException("TLS hostname verification failed.");
+        }
+    }
+
+    private static boolean shouldSendSni(String host) {
+        if (host == null || host.length() == 0 || host.indexOf(':') >= 0) {
+            return false;
+        }
+        boolean hasLetter = false;
+        for (int i = 0; i < host.length(); i++) {
+            char character = host.charAt(i);
+            if ((character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z')) {
+                hasLetter = true;
+                break;
+            }
+        }
+        return hasLetter;
+    }
+
+    private static void setServerNameWithReflection(SSLParameters parameters, String host) {
+        try {
+            Class<?> sniHostNameClass = Class.forName("javax.net.ssl.SNIHostName");
+            Constructor<?> constructor = sniHostNameClass.getConstructor(String.class);
+            Object sniHostName = constructor.newInstance(host);
+            Method setServerNames = SSLParameters.class.getMethod("setServerNames", java.util.List.class);
+            setServerNames.invoke(parameters, Collections.singletonList(sniHostName));
+        } catch (Exception ignored) {
+            // API 23 still uses the host-associated wrapped socket plus explicit verifier below.
         }
     }
 

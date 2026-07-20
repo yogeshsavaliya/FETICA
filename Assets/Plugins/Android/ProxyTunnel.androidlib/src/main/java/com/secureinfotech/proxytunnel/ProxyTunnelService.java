@@ -3,6 +3,8 @@ package com.secureinfotech.proxytunnel;
 import android.app.Service;
 import android.content.Intent;
 import android.os.IBinder;
+import android.os.Handler;
+import android.os.Looper;
 
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -22,6 +24,7 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
 
     private TunnelNotificationManager notificationManager;
     private TunnelConnectionManager connectionManager;
+    private Handler mainHandler;
 
     public static String getStatus() {
         return status;
@@ -50,6 +53,7 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
     @Override
     public void onCreate() {
         super.onCreate();
+        mainHandler = new Handler(Looper.getMainLooper());
         notificationManager = new TunnelNotificationManager(this);
         setStatus(TunnelStatus.DISCONNECTED);
         startForeground(
@@ -138,12 +142,18 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
         setStatus(TunnelStatus.DISCONNECTED);
         setLastError(message);
         TunnelConfig.setUserEnabled(this, false);
-        if (connectionManager != null) {
-            connectionManager.shutdownAfterTerminalFailure();
-            connectionManager = null;
+        final TunnelConnectionManager manager = connectionManager;
+        connectionManager = null;
+        if (manager != null) {
+            manager.shutdownAfterTerminalFailure();
         }
-        stopForeground(true);
-        stopSelf();
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                stopForeground(true);
+                stopSelf();
+            }
+        });
     }
 
     private void stopForTerminalError(String message) {
