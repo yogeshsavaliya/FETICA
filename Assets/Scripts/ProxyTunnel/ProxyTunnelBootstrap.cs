@@ -36,25 +36,41 @@ namespace ProxyTunnel
             set => useTls = value;
         }
 
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void EnsureBootstrapExists()
         {
             if (Instance != null)
             {
+                EnsureDebugUi(Instance.gameObject);
+                return;
+            }
+
+            ProxyTunnelBootstrap sceneBootstrap = FindFirstObjectByType<ProxyTunnelBootstrap>();
+            if (sceneBootstrap != null)
+            {
+                Instance = sceneBootstrap;
+                DontDestroyOnLoad(sceneBootstrap.gameObject);
+                EnsureDebugUi(sceneBootstrap.gameObject);
                 return;
             }
 
             GameObject host = new GameObject("ProxyTunnelBootstrap");
             host.AddComponent<ProxyTunnelBootstrap>();
-            AttachDebugUiIfAvailable(host);
+            EnsureDebugUi(host);
             DontDestroyOnLoad(host);
         }
 
-        private static void AttachDebugUiIfAvailable(GameObject host)
+        private static void EnsureDebugUi(GameObject host)
         {
-            Type debugUiType = Type.GetType("ProxyTunnel.ProxyTunnelDebugUI, Assembly-CSharp")
-                ?? Type.GetType("ProxyTunnel.ProxyTunnelDebugUI");
-            if (debugUiType != null && typeof(MonoBehaviour).IsAssignableFrom(debugUiType))
+            const string debugUiTypeName = "ProxyTunnel.ProxyTunnelDebugUI";
+            Type debugUiType = Type.GetType(debugUiTypeName + ", Assembly-CSharp")
+                ?? Type.GetType(debugUiTypeName);
+            if (debugUiType == null || !typeof(MonoBehaviour).IsAssignableFrom(debugUiType))
+            {
+                return;
+            }
+
+            if (host.GetComponent(debugUiType) == null)
             {
                 host.AddComponent(debugUiType);
             }
