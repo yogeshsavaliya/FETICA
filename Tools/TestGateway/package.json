@@ -1,0 +1,11 @@
+{
+  "name": "proxy-tunnel-test-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal authenticated PING/PONG gateway for Proxy Tunnel Phase 1 testing.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "UNLICENSED"
+}
