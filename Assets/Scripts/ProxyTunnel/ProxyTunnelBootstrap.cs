@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 namespace ProxyTunnel
@@ -61,9 +62,17 @@ namespace ProxyTunnel
 
         private static void EnsureDebugUi(GameObject host)
         {
-            if (host.GetComponent<ProxyTunnelDebugUI>() == null)
+            const string debugUiTypeName = "ProxyTunnel.ProxyTunnelDebugUI";
+            Type debugUiType = Type.GetType(debugUiTypeName + ", Assembly-CSharp")
+                ?? Type.GetType(debugUiTypeName);
+            if (debugUiType == null || !typeof(MonoBehaviour).IsAssignableFrom(debugUiType))
             {
-                host.AddComponent<ProxyTunnelDebugUI>();
+                return;
+            }
+
+            if (host.GetComponent(debugUiType) == null)
+            {
+                host.AddComponent(debugUiType);
             }
         }
 
