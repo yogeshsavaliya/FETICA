@@ -6,6 +6,7 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.os.Build;
+import android.util.Base64;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
@@ -68,7 +69,8 @@ public final class TunnelConnectionManager {
 
     private final Context context;
     private final TunnelConfig config;
-    private final String token;
+    private final String username;
+    private final String password;
     private final Listener listener;
     private final AtomicBoolean stopped = new AtomicBoolean(false);
     private final Object waitLock = new Object();
@@ -86,10 +88,11 @@ public final class TunnelConnectionManager {
     private volatile long uploadedBytes;
     private volatile long downloadedBytes;
 
-    public TunnelConnectionManager(Context context, TunnelConfig config, String token, Listener listener) {
+    public TunnelConnectionManager(Context context, TunnelConfig config, String username, String password, Listener listener) {
         this.context = context.getApplicationContext();
         this.config = config;
-        this.token = token;
+        this.username = username;
+        this.password = password;
         this.listener = listener;
     }
 
@@ -207,7 +210,7 @@ public final class TunnelConnectionManager {
         InputStream inputStream = socket.getInputStream();
         OutputStream outputStream = socket.getOutputStream();
         socket.setSoTimeout(AUTH_TIMEOUT_MS);
-        writeAuthLine(outputStream, "AUTH " + token);
+        writeAuthLine(outputStream, buildAuthLine());
         String authReply = readLineLimited(inputStream, MAX_LINE_LENGTH);
         if (!"OK".equals(authReply)) {
             throw new AuthenticationException();
@@ -305,6 +308,12 @@ public final class TunnelConnectionManager {
         } catch (Exception ignored) {
             // API 23 still uses the host-associated wrapped socket plus explicit verifier below.
         }
+    }
+
+    private String buildAuthLine() {
+        String encodedUsername = Base64.encodeToString(username.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
+        String encodedPassword = Base64.encodeToString(password.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
+        return "AUTH2 " + encodedUsername + " " + encodedPassword;
     }
 
     private void handleFrame(Frame frame) throws IOException {

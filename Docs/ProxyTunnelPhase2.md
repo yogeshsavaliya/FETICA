@@ -6,9 +6,9 @@ foreground service.
 ## Architecture
 
 ```text
-SOCKS client on gateway machine
-  -> local SOCKS5 listener, default 127.0.0.1:1080
-  -> Node test gateway stream multiplexer
+SOCKS client anywhere allowed by firewall
+  -> authenticated SOCKS5 listener on gateway, default 127.0.0.1:1080
+  -> Node gateway stream multiplexer
   -> authenticated outbound Android tunnel, default 127.0.0.1:9090 for local tests
   -> Android foreground service
   -> destination TCP socket opened by Android
@@ -17,35 +17,51 @@ SOCKS client on gateway machine
 The Android device does not open a listening socket. It only makes an outbound,
 user-started foreground-service tunnel connection to the gateway.
 
+## Authentication
+
+There is no token authentication in Phase 2.
+
+Two username/password checks exist:
+
+1. Android tunnel authentication using `TUNNEL_USERNAME` and `TUNNEL_PASSWORD`.
+2. SOCKS5 username/password authentication using `SOCKS_USERNAME` and `SOCKS_PASSWORD`.
+   If SOCKS credentials are omitted, the gateway reuses the tunnel username/password.
+
+The Android tunnel sends:
+
+```text
+AUTH2 base64(username) base64(password)\n
+```
+
+The gateway replies:
+
+```text
+OK\n
+```
+
+Credentials are not logged.
+
 ## Scope
 
 Implemented:
 
-- SOCKS5 no-auth CONNECT support on the gateway side.
+- SOCKS5 username/password CONNECT support on the gateway side.
 - One authenticated Android tunnel carrying multiple framed streams.
 - Gateway-to-Android `OPEN`, `DATA`, and `CLOSE` frames.
 - Android-side destination TCP connect and bidirectional relay.
-- Loopback-only SOCKS listener by default.
 - Foreground notification and explicit Stop action remain the tunnel lifetime controls.
+- Optional TLS server for the Android tunnel when `TLS_CERT_PATH` and `TLS_KEY_PATH` are set.
 
 Not implemented:
 
 - UDP ASSOCIATE.
-- SOCKS username/password authentication.
 - Android `VpnService`.
 - Android local/public listening port.
 - Traffic interception.
 - Hidden background execution.
 - Root functionality.
 
-## Protocol
-
-Authentication is still line based:
-
-```text
-AUTH <token>\n
-OK\n
-```
+## Frame protocol
 
 After `OK`, the tunnel switches to binary frames:
 
@@ -71,11 +87,11 @@ Frame types:
 Maximum frame payload is 64 KiB. Android splits destination reads into 16 KiB DATA
 frames.
 
-## Running the gateway
+## Local run
 
 ```bash
 cd Tools/TestGateway
-TEST_TUNNEL_TOKEN="test-token" npm start
+TUNNEL_USERNAME="user1" TUNNEL_PASSWORD="strong-password" npm start
 ```
 
 Defaults:
@@ -85,33 +101,54 @@ tunnel listener: 127.0.0.1:9090
 SOCKS listener:  127.0.0.1:1080
 ```
 
-For physical Android device testing on a controlled LAN:
+## Global run from any network
+
+Run the gateway on a VPS/public server:
 
 ```bash
-TEST_TUNNEL_TOKEN="test-token" TEST_GATEWAY_HOST=0.0.0.0 npm start
+TUNNEL_USERNAME="user1" \
+TUNNEL_PASSWORD="strong-password" \
+TEST_GATEWAY_HOST=0.0.0.0 \
+SOCKS_HOST=0.0.0.0 \
+npm start
 ```
 
-Keep `SOCKS_HOST` as `127.0.0.1` unless you intentionally need LAN clients to use the
-SOCKS listener. If you bind SOCKS to `0.0.0.0`, firewall it and use only on a trusted test
-network:
+Use firewall rules to restrict access where possible. For the Android tunnel, TLS is
+recommended globally:
 
 ```bash
-TEST_TUNNEL_TOKEN="test-token" TEST_GATEWAY_HOST=0.0.0.0 SOCKS_HOST=0.0.0.0 npm start
+TUNNEL_USERNAME="user1" \
+TUNNEL_PASSWORD="strong-password" \
+TEST_GATEWAY_HOST=0.0.0.0 \
+TLS_CERT_PATH=/etc/letsencrypt/live/example.com/fullchain.pem \
+TLS_KEY_PATH=/etc/letsencrypt/live/example.com/privkey.pem \
+npm start
 ```
 
-## Unity / Android steps
+In Unity, set:
 
-1. Build and install the Unity Android app.
-2. Start the Node gateway.
-3. In the Unity debug panel, enter the gateway host, tunnel port, token, and TLS setting.
-4. Press `Start Reverse SOCKS Tunnel`.
-5. Confirm Android foreground notification remains visible and status becomes Connected.
-6. On the gateway machine, configure a client to use SOCKS5 at `127.0.0.1:1080`.
+```text
+Gateway Host: your public domain or IP
+Gateway Port: 9090
+Username: user1
+Password: strong-password
+Use TLS: on when TLS cert/key are configured
+```
 
-Example curl command on the gateway machine:
+For TLS, the Gateway Host must match the certificate hostname.
+
+## SOCKS client commands
+
+Local gateway machine:
 
 ```bash
-curl --socks5-hostname 127.0.0.1:1080 https://example.com/
+curl -x socks5h://user1:strong-password@127.0.0.1:1080 https://example.com/
+```
+
+Global gateway:
+
+```bash
+curl -x socks5h://user1:strong-password@your-server-domain:1080 https://example.com/
 ```
 
 The destination connection is opened from the Android device/network.
@@ -120,14 +157,15 @@ The destination connection is opened from the Android device/network.
 
 1. Android app starts only after explicit button press.
 2. Foreground notification appears immediately.
-3. Gateway logs tunnel connected without logging token.
-4. SOCKS listener binds to `127.0.0.1` by default.
-5. `curl --socks5-hostname 127.0.0.1:1080 https://example.com/` succeeds while Android
-   tunnel is connected.
-6. Multiple SOCKS CONNECT streams can run concurrently.
-7. Notification Stop closes all streams and the tunnel.
-8. Wi-Fi loss causes Reconnecting and closes active streams.
-9. Restored network reconnects the tunnel.
-10. Wrong token terminates the service and does not retry aggressively.
-11. No Android `VpnService` is declared.
-12. No Android listening socket is opened.
+3. Gateway logs tunnel connected without logging credentials.
+4. Wrong tunnel username/password terminates the service and does not retry aggressively.
+5. SOCKS client without username/password is rejected.
+6. SOCKS client with correct username/password can CONNECT through the Android tunnel.
+7. `curl -x socks5h://user:pass@127.0.0.1:1080 https://example.com/` succeeds while
+   Android tunnel is connected.
+8. Multiple SOCKS CONNECT streams can run concurrently.
+9. Notification Stop closes all streams and the tunnel.
+10. Wi-Fi loss causes Reconnecting and closes active streams.
+11. Restored network reconnects the tunnel.
+12. No Android `VpnService` is declared.
+13. No Android listening socket is opened.

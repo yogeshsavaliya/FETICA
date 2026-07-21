@@ -8,14 +8,16 @@ namespace ProxyTunnel
 
         [SerializeField] private string gatewayHost = "127.0.0.1";
         [SerializeField] private int gatewayPort = 9090;
-        [SerializeField] private string token = string.Empty;
+        [SerializeField] private string username = string.Empty;
+        [SerializeField] private string password = string.Empty;
         [SerializeField] private bool useTls = true;
         [SerializeField] private bool showDebugUi = true;
 
         private const int DebugPanelWidth = 460;
         private string debugHost;
         private string debugPort;
-        private string debugToken;
+        private string debugUsername;
+        private string debugPassword;
         private bool debugUseTls;
         private Vector2 debugScroll;
 
@@ -31,10 +33,16 @@ namespace ProxyTunnel
             set => gatewayPort = value;
         }
 
-        public string Token
+        public string Username
         {
-            get => token;
-            set => token = value;
+            get => username;
+            set => username = value;
+        }
+
+        public string Password
+        {
+            get => password;
+            set => password = value;
         }
 
         public bool UseTls
@@ -79,14 +87,15 @@ namespace ProxyTunnel
 
         public bool StartTunnel()
         {
-            return ProxyTunnelClient.StartTunnel(gatewayHost, gatewayPort, token, useTls);
+            return ProxyTunnelClient.StartTunnel(gatewayHost, gatewayPort, username, password, useTls);
         }
 
-        public bool StartTunnel(string host, int port, string authToken, bool tls)
+        public bool StartTunnel(string host, int port, string authUsername, string authPassword, bool tls)
         {
             gatewayHost = host;
             gatewayPort = port;
-            token = authToken;
+            username = authUsername;
+            password = authPassword;
             useTls = tls;
             SyncDebugFieldsFromConfig();
             return StartTunnel();
@@ -116,8 +125,11 @@ namespace ProxyTunnel
             GUILayout.Label("Gateway tunnel port");
             debugPort = GUILayout.TextField(debugPort ?? string.Empty);
 
-            GUILayout.Label("Token");
-            debugToken = GUILayout.PasswordField(debugToken ?? string.Empty, '*');
+            GUILayout.Label("Username");
+            debugUsername = GUILayout.TextField(debugUsername ?? string.Empty);
+
+            GUILayout.Label("Password");
+            debugPassword = GUILayout.PasswordField(debugPassword ?? string.Empty, '*');
 
             debugUseTls = GUILayout.Toggle(debugUseTls, "Use TLS");
 
@@ -150,14 +162,15 @@ namespace ProxyTunnel
                 return;
             }
 
-            StartTunnel(debugHost, parsedPort, debugToken, debugUseTls);
+            StartTunnel(debugHost, parsedPort, debugUsername, debugPassword, debugUseTls);
         }
 
         private void SyncDebugFieldsFromConfig()
         {
             debugHost = gatewayHost;
             debugPort = gatewayPort.ToString();
-            debugToken = token;
+            debugUsername = username;
+            debugPassword = password;
             debugUseTls = useTls;
         }
 

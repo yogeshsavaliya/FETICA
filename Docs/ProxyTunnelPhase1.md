@@ -69,10 +69,10 @@ Limitations:
 ```text
 ProxyTunnelBootstrap.StartTunnel(...)
 ProxyTunnelClient.StartTunnel(...)
-ProxyTunnelBridge.startTunnel(Activity, host, port, token, useTls)
+ProxyTunnelBridge.startTunnel(Activity, host, port, username, password, useTls)
 ```
 
-The Java bridge validates host, port, and token shape. On Android 13+ it requests
+The Java bridge validates host, port, and username/password shape. On Android 13+ it requests
 notification permission through the Unity activity and asks the user to press Start again
 after granting permission. It then starts `ProxyTunnelService`.
 
@@ -113,7 +113,7 @@ trust manager, and does not bypass certificate verification.
 Protocol:
 
 ```text
-client: AUTH <token>\n
+client: AUTH2 base64(username) base64(password)\n
 server: OK\n
 client: PING\n every 15 seconds
 server: PONG\n
@@ -129,7 +129,7 @@ Rules implemented:
 - Networking never runs on Android's main thread.
 - Server commands are not accepted in Phase 1.
 
-The token is passed only in memory to the service start intent and is not stored in
+The username/password are passed only in memory to the service start intent and are not stored in
 `SharedPreferences`. Host, port, TLS setting, and whether the user enabled the service are
 persisted. If Android kills the process and credentials are unavailable, the tunnel must be
 started again by the user.
@@ -179,13 +179,13 @@ Run on the development computer:
 
 ```bash
 cd Tools/TestGateway
-TEST_TUNNEL_TOKEN="replace-with-test-token" npm start
+TUNNEL_USERNAME="user1" TUNNEL_PASSWORD="strong-password" npm start
 ```
 
 For controlled LAN testing with a physical device:
 
 ```bash
-TEST_TUNNEL_TOKEN="replace-with-test-token" TEST_GATEWAY_HOST=0.0.0.0 npm start
+TUNNEL_USERNAME="user1" TUNNEL_PASSWORD="strong-password" TEST_GATEWAY_HOST=0.0.0.0 npm start
 ```
 
 Use the computer's LAN IP address as the gateway host in the Unity debug UI. Do not expose
@@ -197,7 +197,7 @@ the test gateway to the public internet.
 2. Start the test gateway with `TEST_GATEWAY_HOST=0.0.0.0`.
 3. Build and install the Unity Android app.
 4. Launch the app.
-5. Enter gateway host, port, token, and TLS setting. The provided test gateway is plain TCP,
+5. Enter gateway host, port, username, password, and TLS setting. The provided test gateway is plain TCP,
    so use TLS off for this test.
 6. Press Start. On Android 13+, grant notification permission, then press Start again.
 7. Confirm the foreground notification appears and moves to Connected.
@@ -235,8 +235,8 @@ The Stop action fully terminates the socket and service.
 
 - Host must be non-empty.
 - Port must be 1-65535.
-- Tokens containing newlines are rejected.
-- Tokens are never intentionally logged.
+- Usernames/passwords containing newlines are rejected.
+- Credentials are never intentionally logged.
 - Authentication and protocol response line lengths are bounded.
 - TLS uses Android platform certificate verification.
 - No permissive trust manager is installed.
@@ -257,8 +257,8 @@ The Stop action fully terminates the socket and service.
 9. Wi-Fi disconnect causes Reconnecting status.
 10. Restoring the network reconnects automatically.
 11. Notification Stop action terminates the socket and service.
-12. Incorrect token does not continuously retry authentication aggressively.
-13. Token never appears in logcat.
+12. Incorrect username/password does not continuously retry authentication aggressively.
+13. Credentials never appear in logcat.
 14. No `VpnService` is declared.
 15. No listening socket is opened on the Android device.
 16. No SOCKS5 or traffic-forwarding code exists.
@@ -277,14 +277,14 @@ Unity Android toolchain available:
    - Run the TLS gateway with a certificate valid for a different hostname.
    - Start with `Use TLS` enabled and the unmatched hostname in the Unity UI.
    - Expected: TLS handshake/session verification fails, no AUTH retry storm occurs, and
-     the token is not logged.
+     credentials are not logged.
 3. Authentication failure terminates the service:
-   - Start the tunnel with an incorrect token.
+   - Start the tunnel with incorrect username/password.
    - Expected: status becomes Disconnected, final error remains readable from Unity,
      user-enabled persistence is cleared, foreground notification is removed, and the
      service stops.
 4. Temporary disconnect reconnects:
-   - Start with a correct token and then interrupt Wi-Fi or stop the gateway after a
+   - Start with correct username/password and then interrupt Wi-Fi or stop the gateway after a
      successful connection.
    - Expected: status becomes Reconnecting, reconnect uses bounded backoff, and restoring
      network/gateway connectivity returns status to Connected.

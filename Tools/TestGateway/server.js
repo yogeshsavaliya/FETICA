@@ -1,12 +1,14 @@
 "use strict";
 
+const fs = require("fs");
 const net = require("net");
+const tls = require("tls");
 
 const DEFAULT_TUNNEL_HOST = "127.0.0.1";
 const DEFAULT_TUNNEL_PORT = 9090;
 const DEFAULT_SOCKS_HOST = "127.0.0.1";
 const DEFAULT_SOCKS_PORT = 1080;
-const MAX_LINE_LENGTH = 256;
+const MAX_LINE_LENGTH = 512;
 const MAX_FRAME_LENGTH = 64 * 1024;
 const AUTH_TIMEOUT_MS = 10_000;
 const TUNNEL_IDLE_TIMEOUT_MS = 45_000;
@@ -21,12 +23,10 @@ const FRAME_OPEN_ERROR = 5;
 const FRAME_DATA = 6;
 const FRAME_CLOSE = 7;
 
-const expectedToken = process.env.TEST_TUNNEL_TOKEN;
-if (!expectedToken) {
-  console.error("TEST_TUNNEL_TOKEN must be set.");
-  process.exit(1);
-}
-
+const tunnelUsername = requireSecret("TUNNEL_USERNAME");
+const tunnelPassword = requireSecret("TUNNEL_PASSWORD");
+const socksUsername = process.env.SOCKS_USERNAME || tunnelUsername;
+const socksPassword = process.env.SOCKS_PASSWORD || tunnelPassword;
 const tunnelHost = process.env.TEST_GATEWAY_HOST || DEFAULT_TUNNEL_HOST;
 const tunnelPort = parsePort(process.env.TEST_GATEWAY_PORT || String(DEFAULT_TUNNEL_PORT), "TEST_GATEWAY_PORT");
 const socksHost = process.env.SOCKS_HOST || DEFAULT_SOCKS_HOST;
@@ -35,7 +35,49 @@ const socksPort = parsePort(process.env.SOCKS_PORT || String(DEFAULT_SOCKS_PORT)
 let activeTunnel = null;
 let nextStreamId = 1;
 
-const tunnelServer = net.createServer((socket) => {
+const tunnelServer = createTunnelServer();
+const socksServer = net.createServer((client) => {
+  const remote = `${client.remoteAddress}:${client.remotePort}`;
+  client.setNoDelay(true);
+  client.setTimeout(SOCKS_TIMEOUT_MS);
+  handleSocksClient(client, remote).catch((error) => {
+    console.log(`socks client closed: ${remote} ${error.message}`);
+    client.destroy();
+  });
+});
+
+socksServer.on("error", (error) => {
+  console.error(`socks server error: ${error.message}`);
+});
+
+tunnelServer.listen(tunnelPort, tunnelHost, () => {
+  const mode = isTlsEnabled() ? "TLS" : "plain TCP";
+  console.log(`tunnel gateway listening on ${tunnelHost}:${tunnelPort} (${mode})`);
+});
+
+socksServer.listen(socksPort, socksHost, () => {
+  console.log(`authenticated SOCKS5 listener on ${socksHost}:${socksPort}`);
+  if (socksHost !== "127.0.0.1" && socksHost !== "::1") {
+    console.log("WARNING: SOCKS listener is not loopback-only. Use only with strong credentials and firewall rules.");
+  }
+});
+
+function createTunnelServer() {
+  if (!isTlsEnabled()) {
+    return net.createServer(handleTunnelSocket);
+  }
+  const options = {
+    cert: fs.readFileSync(process.env.TLS_CERT_PATH),
+    key: fs.readFileSync(process.env.TLS_KEY_PATH),
+  };
+  return tls.createServer(options, handleTunnelSocket);
+}
+
+function isTlsEnabled() {
+  return Boolean(process.env.TLS_CERT_PATH && process.env.TLS_KEY_PATH);
+}
+
+function handleTunnelSocket(socket) {
   const remote = `${socket.remoteAddress}:${socket.remotePort}`;
   console.log(`tunnel connected: ${remote}`);
   if (activeTunnel) {
@@ -62,7 +104,7 @@ const tunnelServer = net.createServer((socket) => {
     const rawLine = authBuffer.subarray(0, newlineIndex).toString("utf8");
     const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
     const remaining = authBuffer.subarray(newlineIndex + 1);
-    if (!isValidAuth(line)) {
+    if (!isValidTunnelAuth(line)) {
       socket.write("ERROR\n");
       socket.end();
       return;
@@ -92,32 +134,7 @@ const tunnelServer = net.createServer((socket) => {
   socket.on("error", (error) => {
     console.log(`tunnel socket error: ${remote} ${error.code || "unknown"}`);
   });
-});
-
-const socksServer = net.createServer((client) => {
-  const remote = `${client.remoteAddress}:${client.remotePort}`;
-  client.setNoDelay(true);
-  client.setTimeout(SOCKS_TIMEOUT_MS);
-  handleSocksClient(client, remote).catch((error) => {
-    console.log(`socks client closed: ${remote} ${error.message}`);
-    client.destroy();
-  });
-});
-
-socksServer.on("error", (error) => {
-  console.error(`socks server error: ${error.message}`);
-});
-
-tunnelServer.listen(tunnelPort, tunnelHost, () => {
-  console.log(`tunnel gateway listening on ${tunnelHost}:${tunnelPort}`);
-});
-
-socksServer.listen(socksPort, socksHost, () => {
-  console.log(`SOCKS5 listener on ${socksHost}:${socksPort}`);
-  if (socksHost !== "127.0.0.1" && socksHost !== "::1") {
-    console.log("WARNING: SOCKS listener is not loopback-only. Use only on controlled test networks.");
-  }
-});
+}
 
 class TunnelSession {
   constructor(socket, remote) {
@@ -197,9 +214,7 @@ class TunnelSession {
     });
     const stream = { streamId, client, opened: false, resolveOpen, rejectOpen };
     this.streams.set(streamId, stream);
-
-    const payload = Buffer.from(`${targetHost}\n${targetPort}`, "utf8");
-    this.sendFrame(FRAME_OPEN, streamId, payload);
+    this.sendFrame(FRAME_OPEN, streamId, Buffer.from(`${targetHost}\n${targetPort}`, "utf8"));
 
     const timer = setTimeout(() => {
       if (!stream.opened) {
@@ -212,9 +227,6 @@ class TunnelSession {
   }
 
   sendData(streamId, chunk) {
-    if (chunk.length === 0) {
-      return;
-    }
     let offset = 0;
     while (offset < chunk.length) {
       const end = Math.min(offset + MAX_FRAME_LENGTH, chunk.length);
@@ -264,24 +276,21 @@ class TunnelSession {
 }
 
 async function handleSocksClient(client, remote) {
-  if (!activeTunnel) {
-    throw new Error("no active Android tunnel");
-  }
-
   const greeting = await readExactly(client, 2);
   if (greeting[0] !== 0x05) {
     throw new Error("unsupported SOCKS version");
   }
   const methods = await readExactly(client, greeting[1]);
-  if (!methods.includes(0x00)) {
+  if (!methods.includes(0x02)) {
     client.write(Buffer.from([0x05, 0xff]));
-    throw new Error("SOCKS no-auth method unavailable");
+    throw new Error("SOCKS username/password method required");
   }
-  client.write(Buffer.from([0x05, 0x00]));
+  client.write(Buffer.from([0x05, 0x02]));
+  await authenticateSocksClient(client);
 
   const header = await readExactly(client, 4);
   if (header[0] !== 0x05 || header[1] !== 0x01) {
-    await writeSocksReply(client, 0x07);
+    writeSocksReply(client, 0x07);
     throw new Error("only SOCKS CONNECT is supported");
   }
 
@@ -290,9 +299,14 @@ async function handleSocksClient(client, remote) {
   const targetPort = portBuffer.readUInt16BE(0);
   console.log(`SOCKS CONNECT ${address.host}:${targetPort} from ${remote}`);
 
+  if (!activeTunnel) {
+    writeSocksReply(client, 0x01);
+    throw new Error("no active Android tunnel");
+  }
+
   const tunnel = activeTunnel;
   const streamId = await tunnel.openStream(client, address.host, targetPort);
-  await writeSocksReply(client, 0x00);
+  writeSocksReply(client, 0x00);
 
   client.on("data", (chunk) => {
     try {
@@ -304,6 +318,23 @@ async function handleSocksClient(client, remote) {
   client.on("close", () => tunnel.closeStream(streamId, true));
   client.on("error", () => tunnel.closeStream(streamId, true));
   client.on("timeout", () => tunnel.closeStream(streamId, true));
+}
+
+async function authenticateSocksClient(client) {
+  const version = await readExactly(client, 1);
+  if (version[0] !== 0x01) {
+    client.write(Buffer.from([0x01, 0x01]));
+    throw new Error("invalid SOCKS auth version");
+  }
+  const usernameLength = (await readExactly(client, 1))[0];
+  const username = (await readExactly(client, usernameLength)).toString("utf8");
+  const passwordLength = (await readExactly(client, 1))[0];
+  const password = (await readExactly(client, passwordLength)).toString("utf8");
+  if (username !== socksUsername || password !== socksPassword) {
+    client.write(Buffer.from([0x01, 0x01]));
+    throw new Error("SOCKS authentication failed");
+  }
+  client.write(Buffer.from([0x01, 0x00]));
 }
 
 function readSocksAddress(client, atyp) {
@@ -374,12 +405,23 @@ function writeSocksReply(client, code) {
   client.write(Buffer.from([0x05, code, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
 }
 
-function isValidAuth(line) {
-  const prefix = "AUTH ";
-  if (!line.startsWith(prefix)) {
+function isValidTunnelAuth(line) {
+  const parts = line.split(" ");
+  if (parts.length !== 3 || parts[0] !== "AUTH2") {
     return false;
   }
-  return line.slice(prefix.length) === expectedToken;
+  const username = Buffer.from(parts[1], "base64").toString("utf8");
+  const password = Buffer.from(parts[2], "base64").toString("utf8");
+  return username === tunnelUsername && password === tunnelPassword;
+}
+
+function requireSecret(name) {
+  const value = process.env[name];
+  if (!value) {
+    console.error(`${name} must be set.`);
+    process.exit(1);
+  }
+  return value;
 }
 
 function parsePort(value, name) {

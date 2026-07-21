@@ -8,7 +8,8 @@ namespace ProxyTunnel
 
         private string host = "127.0.0.1";
         private string port = "9090";
-        private string token = string.Empty;
+        private string username = string.Empty;
+        private string password = string.Empty;
         private bool useTls = true;
         private Vector2 scroll;
 
@@ -21,7 +22,8 @@ namespace ProxyTunnel
 
             host = ProxyTunnelBootstrap.Instance.GatewayHost;
             port = ProxyTunnelBootstrap.Instance.GatewayPort.ToString();
-            token = ProxyTunnelBootstrap.Instance.Token;
+            username = ProxyTunnelBootstrap.Instance.Username;
+            password = ProxyTunnelBootstrap.Instance.Password;
             useTls = ProxyTunnelBootstrap.Instance.UseTls;
         }
 
@@ -30,7 +32,7 @@ namespace ProxyTunnel
             GUILayout.BeginArea(new Rect(20, 20, PanelWidth, Screen.height - 40), GUI.skin.box);
             scroll = GUILayout.BeginScrollView(scroll);
 
-            GUILayout.Label("Proxy Tunnel Phase 1");
+            GUILayout.Label("Proxy Tunnel Phase 2 - Reverse SOCKS");
 
             GUILayout.Label("Gateway host");
             host = GUILayout.TextField(host);
@@ -38,8 +40,11 @@ namespace ProxyTunnel
             GUILayout.Label("Gateway port");
             port = GUILayout.TextField(port);
 
-            GUILayout.Label("Token");
-            token = GUILayout.PasswordField(token, '*');
+            GUILayout.Label("Username");
+            username = GUILayout.TextField(username);
+
+            GUILayout.Label("Password");
+            password = GUILayout.PasswordField(password, '*');
 
             useTls = GUILayout.Toggle(useTls, "Use TLS");
 
@@ -78,7 +83,7 @@ namespace ProxyTunnel
                 return;
             }
 
-            bootstrap.StartTunnel(host, parsedPort, token, useTls);
+            bootstrap.StartTunnel(host, parsedPort, username, password, useTls);
         }
     }
 }
