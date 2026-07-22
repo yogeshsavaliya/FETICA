@@ -75,6 +75,21 @@ npm start
 Then enable `Use TLS` in the Unity debug UI and use the certificate hostname as Gateway
 Host. Do not use trust-all certificates.
 
+If the Delhi client app has only an `HTTPS proxy` option and no `SOCKS5` or plain `HTTP
+proxy` option, run the proxy listener itself over TLS too:
+
+```bash
+TUNNEL_USERNAME="user1" \
+TUNNEL_PASSWORD="strong-password" \
+TEST_GATEWAY_HOST=0.0.0.0 \
+SOCKS_HOST=0.0.0.0 \
+PROXY_TLS_CERT_PATH=/etc/letsencrypt/live/example.com/fullchain.pem \
+PROXY_TLS_KEY_PATH=/etc/letsencrypt/live/example.com/privkey.pem \
+npm start
+```
+
+Then configure the Delhi client as an HTTPS proxy using the same host and port `1080`.
+
 ## Test with curl
 
 After the Android app connects to the tunnel:
@@ -98,6 +113,10 @@ HTTP Proxy Port: 1080
 Username: user1
 Password: strong-password
 ```
+
+Do not select `HTTPS proxy` unless `PROXY_TLS_CERT_PATH` and `PROXY_TLS_KEY_PATH` are set
+on the gateway. If HTTPS proxy mode hits a plain listener, the server logs a clear
+diagnostic and closes that client connection.
 
 The gateway accepts SOCKS5 username/password CONNECT requests and HTTP CONNECT proxy
 requests, then forwards each CONNECT over the single authenticated Android tunnel as a

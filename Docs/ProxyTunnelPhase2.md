@@ -200,6 +200,18 @@ Username: user1
 Password: strong-password
 ```
 
+If the Delhi client only supports HTTPS proxy mode, configure TLS on the proxy listener:
+
+```bash
+PROXY_TLS_CERT_PATH=/etc/letsencrypt/live/example.com/fullchain.pem \
+PROXY_TLS_KEY_PATH=/etc/letsencrypt/live/example.com/privkey.pem \
+npm start
+```
+
+Then set the Delhi client to HTTPS proxy mode on port `1080`. If an HTTPS-proxy client is
+sent to a plain proxy listener, the gateway logs that the client is using TLS on a plain
+proxy port.
+
 The destination connection is opened from the Android device/network.
 
 ## Acceptance tests

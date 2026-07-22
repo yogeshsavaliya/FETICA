@@ -36,18 +36,10 @@ let activeTunnel = null;
 let nextStreamId = 1;
 
 const tunnelServer = createTunnelServer();
-const socksServer = net.createServer((client) => {
-  const remote = `${client.remoteAddress}:${client.remotePort}`;
-  client.setNoDelay(true);
-  client.setTimeout(SOCKS_TIMEOUT_MS);
-  handleProxyClient(client, remote).catch((error) => {
-    console.log(`socks client closed: ${remote} ${error.message}`);
-    client.destroy();
-  });
-});
+const socksServer = createProxyServer();
 
 socksServer.on("error", (error) => {
-  console.error(`socks server error: ${error.message}`);
+  console.error(`proxy server error: ${error.message}`);
 });
 
 tunnelServer.listen(tunnelPort, tunnelHost, () => {
@@ -56,11 +48,33 @@ tunnelServer.listen(tunnelPort, tunnelHost, () => {
 });
 
 socksServer.listen(socksPort, socksHost, () => {
-  console.log(`authenticated SOCKS5/HTTP CONNECT listener on ${socksHost}:${socksPort}`);
+  const mode = isProxyTlsEnabled() ? "TLS" : "plain TCP";
+  console.log(`authenticated SOCKS5/HTTP CONNECT listener on ${socksHost}:${socksPort} (${mode})`);
   if (socksHost !== "127.0.0.1" && socksHost !== "::1") {
     console.log("WARNING: SOCKS listener is not loopback-only. Use only with strong credentials and firewall rules.");
   }
 });
+
+function createProxyServer() {
+  if (!isProxyTlsEnabled()) {
+    return net.createServer(handleProxySocket);
+  }
+  const options = {
+    cert: fs.readFileSync(process.env.PROXY_TLS_CERT_PATH),
+    key: fs.readFileSync(process.env.PROXY_TLS_KEY_PATH),
+  };
+  return tls.createServer(options, handleProxySocket);
+}
+
+function handleProxySocket(client) {
+  const remote = `${client.remoteAddress}:${client.remotePort}`;
+  client.setNoDelay(true);
+  client.setTimeout(SOCKS_TIMEOUT_MS);
+  handleProxyClient(client, remote).catch((error) => {
+    console.log(`socks client closed: ${remote} ${error.message}`);
+    client.destroy();
+  });
+}
 
 function createTunnelServer() {
   if (!isTlsEnabled()) {
@@ -75,6 +89,10 @@ function createTunnelServer() {
 
 function isTlsEnabled() {
   return Boolean(process.env.TLS_CERT_PATH && process.env.TLS_KEY_PATH);
+}
+
+function isProxyTlsEnabled() {
+  return Boolean(process.env.PROXY_TLS_CERT_PATH && process.env.PROXY_TLS_KEY_PATH);
 }
 
 function handleTunnelSocket(socket) {
@@ -284,6 +302,9 @@ async function handleProxyClient(client, remote) {
   const firstByte = await readExactly(client, 1);
   if (firstByte[0] === 0x05) {
     return handleSocksClient(client, remote, firstByte[0]);
+  }
+  if (firstByte[0] === 0x16 && !isProxyTlsEnabled()) {
+    throw new Error("client appears to be using HTTPS/TLS proxy mode on a plain proxy listener; select SOCKS5/HTTP proxy or configure PROXY_TLS_CERT_PATH and PROXY_TLS_KEY_PATH");
   }
   client.unshift(firstByte);
   return handleHttpConnectClient(client, remote);
