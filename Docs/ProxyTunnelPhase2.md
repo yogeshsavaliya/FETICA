@@ -212,6 +212,15 @@ Then set the Delhi client to HTTPS proxy mode on port `1080`. If an HTTPS-proxy 
 sent to a plain proxy listener, the gateway logs that the client is using TLS on a plain
 proxy port.
 
+Some Android SOCKS apps perform a non-standard connection test where they open TCP and wait
+for the server to speak first. The gateway includes a compatibility fallback for that case:
+if no first byte arrives quickly, it sends the SOCKS5 username/password method selection and
+continues the normal SOCKS auth flow. The gateway logs:
+
+```text
+SOCKS compatibility greeting sent to <client-ip>:<port>
+```
+
 The destination connection is opened from the Android device/network.
 
 ## Acceptance tests

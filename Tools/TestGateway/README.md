@@ -118,6 +118,15 @@ Do not select `HTTPS proxy` unless `PROXY_TLS_CERT_PATH` and `PROXY_TLS_KEY_PATH
 on the gateway. If HTTPS proxy mode hits a plain listener, the server logs a clear
 diagnostic and closes that client connection.
 
+Some Android SOCKS apps open a TCP connection and wait for the server to speak first during
+their connection test. That is not standard SOCKS5 behavior, but the gateway includes a
+compatibility fallback: if no first byte arrives quickly, it sends the SOCKS5
+username/password method selection and continues the normal auth flow. The server logs:
+
+```text
+SOCKS compatibility greeting sent to <client-ip>:<port>
+```
+
 The gateway accepts SOCKS5 username/password CONNECT requests and HTTP CONNECT proxy
 requests, then forwards each CONNECT over the single authenticated Android tunnel as a
 framed stream. The Android device opens the final outbound destination TCP connection.

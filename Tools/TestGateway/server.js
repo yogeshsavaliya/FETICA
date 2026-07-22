@@ -13,6 +13,7 @@ const MAX_FRAME_LENGTH = 64 * 1024;
 const AUTH_TIMEOUT_MS = 10_000;
 const TUNNEL_IDLE_TIMEOUT_MS = 5 * 60_000;
 const SOCKS_TIMEOUT_MS = 30_000;
+const PROXY_FIRST_BYTE_TIMEOUT_MS = 1500;
 const OPEN_TIMEOUT_MS = 15_000;
 
 const FRAME_PING = 1;
@@ -299,7 +300,13 @@ class TunnelSession {
 }
 
 async function handleProxyClient(client, remote) {
-  const firstByte = await readExactly(client, 1);
+  const firstByte = await readExactlyOrNull(client, 1, PROXY_FIRST_BYTE_TIMEOUT_MS);
+  if (!firstByte) {
+    console.log(`SOCKS compatibility greeting sent to ${remote}`);
+    client.write(Buffer.from([0x05, 0x02]));
+    await authenticateSocksClient(client);
+    return handleSocksConnectRequest(client, remote);
+  }
   if (firstByte[0] === 0x05) {
     return handleSocksClient(client, remote, firstByte[0]);
   }
@@ -322,7 +329,10 @@ async function handleSocksClient(client, remote, version) {
   }
   client.write(Buffer.from([0x05, 0x02]));
   await authenticateSocksClient(client);
+  return handleSocksConnectRequest(client, remote);
+}
 
+async function handleSocksConnectRequest(client, remote) {
   const header = await readExactly(client, 4);
   if (header[0] !== 0x05 || header[1] !== 0x01) {
     writeSocksReply(client, 0x07);
@@ -523,6 +533,51 @@ function readExactly(socket, length) {
   return new Promise((resolve, reject) => {
     let buffer = Buffer.alloc(0);
     function cleanup() {
+      socket.off("data", onData);
+      socket.off("close", onClose);
+      socket.off("error", onError);
+      socket.off("timeout", onTimeout);
+    }
+    function onData(chunk) {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (buffer.length >= length) {
+        cleanup();
+        const needed = buffer.subarray(0, length);
+        const rest = buffer.subarray(length);
+        if (rest.length > 0) {
+          socket.unshift(rest);
+        }
+        resolve(needed);
+      }
+    }
+    function onClose() {
+      cleanup();
+      reject(new Error("socket closed"));
+    }
+    function onError(error) {
+      cleanup();
+      reject(error);
+    }
+    function onTimeout() {
+      cleanup();
+      reject(new Error("socket timeout"));
+    }
+    socket.on("data", onData);
+    socket.on("close", onClose);
+    socket.on("error", onError);
+    socket.on("timeout", onTimeout);
+  });
+}
+
+function readExactlyOrNull(socket, length, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve(null);
+    }, timeoutMs);
+    let buffer = Buffer.alloc(0);
+    function cleanup() {
+      clearTimeout(timer);
       socket.off("data", onData);
       socket.off("close", onClose);
       socket.off("error", onError);
