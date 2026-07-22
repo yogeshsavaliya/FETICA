@@ -137,6 +137,44 @@ Use TLS: on when TLS cert/key are configured
 
 For TLS, the Gateway Host must match the certificate hostname.
 
+## 24/7 connectivity notes
+
+The gateway and Android tunnel are tuned for long-lived connections:
+
+- Gateway tunnel idle timeout is 5 minutes.
+- Android tunnel read timeout is 5 minutes.
+- TCP keepalive is enabled on the gateway and Android tunnel sockets.
+- Android foreground service holds a partial wake lock while running.
+
+Android still may stop long-running work if the user or OEM battery manager restricts the
+app. For 24/7 testing on the Mumbai phone:
+
+1. Keep the foreground notification visible.
+2. Disable battery optimization for the Unity app.
+3. Allow background activity/autostart for the Unity app if the device vendor provides
+   those settings.
+4. Keep mobile data/Wi-Fi stable.
+
+For your static IP `144.45.29.130`, a plain TCP test command is:
+
+```bash
+TUNNEL_USERNAME="user1" \
+TUNNEL_PASSWORD="strong-password" \
+TEST_GATEWAY_HOST=0.0.0.0 \
+SOCKS_HOST=0.0.0.0 \
+npm start
+```
+
+Android app settings:
+
+```text
+Gateway Host: 144.45.29.130
+Gateway Port: 9090
+Username: user1
+Password: strong-password
+Use TLS: off for this plain TCP test
+```
+
 ## SOCKS client commands
 
 Local gateway machine:

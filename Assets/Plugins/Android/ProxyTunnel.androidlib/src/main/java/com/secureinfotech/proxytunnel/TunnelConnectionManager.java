@@ -50,7 +50,7 @@ public final class TunnelConnectionManager {
 
     private static final int CONNECT_TIMEOUT_MS = 10_000;
     private static final int AUTH_TIMEOUT_MS = 10_000;
-    private static final int TUNNEL_READ_TIMEOUT_MS = 45_000;
+    private static final int TUNNEL_READ_TIMEOUT_MS = 5 * 60_000;
     private static final int STREAM_CONNECT_TIMEOUT_MS = 10_000;
     private static final int MAX_LINE_LENGTH = 256;
     private static final int MAX_FRAME_LENGTH = 64 * 1024;
@@ -236,17 +236,20 @@ public final class TunnelConnectionManager {
     private Socket createSocket() throws IOException {
         if (!config.useTls) {
             Socket socket = new Socket();
+            socket.setKeepAlive(true);
             socket.connect(new InetSocketAddress(config.host, config.port), CONNECT_TIMEOUT_MS);
             return socket;
         }
 
         Socket plainSocket = new Socket();
+        plainSocket.setKeepAlive(true);
         SSLSocket tlsSocket = null;
         try {
             plainSocket.connect(new InetSocketAddress(config.host, config.port), CONNECT_TIMEOUT_MS);
             SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
             tlsSocket = (SSLSocket) factory.createSocket(plainSocket, config.host, config.port, true);
             configureTlsSocket(tlsSocket);
+            tlsSocket.setKeepAlive(true);
             tlsSocket.startHandshake();
             verifyHostname(tlsSocket);
             return tlsSocket;

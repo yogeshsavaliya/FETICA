@@ -45,6 +45,14 @@ SOCKS_HOST=0.0.0.0 \
 npm start
 ```
 
+For static IP `144.45.29.130`, Android should connect to:
+
+```text
+Gateway Host: 144.45.29.130
+Gateway Port: 9090
+Use TLS: off unless you configure a valid TLS certificate/domain
+```
+
 Open/firewall only the ports you need:
 
 ```text
@@ -93,3 +101,11 @@ the final outbound destination TCP connection.
   firewall rules.
 - The Android device does not open a listening socket.
 - This test gateway is a development prototype, not a hardened production proxy service.
+
+## 24/7 notes
+
+- The gateway keeps authenticated tunnel sockets alive for up to 5 idle minutes and enables
+  TCP keepalive.
+- The Android service uses a foreground notification and partial wake lock.
+- On the Android phone, disable battery optimization for the Unity app and allow background
+  activity/autostart where the vendor settings require it.

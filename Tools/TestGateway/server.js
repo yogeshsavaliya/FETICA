@@ -11,7 +11,7 @@ const DEFAULT_SOCKS_PORT = 1080;
 const MAX_LINE_LENGTH = 512;
 const MAX_FRAME_LENGTH = 64 * 1024;
 const AUTH_TIMEOUT_MS = 10_000;
-const TUNNEL_IDLE_TIMEOUT_MS = 45_000;
+const TUNNEL_IDLE_TIMEOUT_MS = 5 * 60_000;
 const SOCKS_TIMEOUT_MS = 30_000;
 const OPEN_TIMEOUT_MS = 15_000;
 
@@ -86,6 +86,7 @@ function handleTunnelSocket(socket) {
   }
 
   socket.setNoDelay(true);
+  socket.setKeepAlive(true, 30_000);
   socket.setTimeout(AUTH_TIMEOUT_MS);
   let authBuffer = Buffer.alloc(0);
 
@@ -105,6 +106,7 @@ function handleTunnelSocket(socket) {
     const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
     const remaining = authBuffer.subarray(newlineIndex + 1);
     if (!isValidTunnelAuth(line)) {
+      console.log(`tunnel authentication failed: ${remote}`);
       socket.write("ERROR\n");
       socket.end();
       return;
@@ -112,6 +114,7 @@ function handleTunnelSocket(socket) {
 
     socket.write("OK\n");
     socket.setTimeout(TUNNEL_IDLE_TIMEOUT_MS);
+    socket.setKeepAlive(true, 30_000);
     activeTunnel = new TunnelSession(socket, remote);
     if (remaining.length > 0) {
       activeTunnel.receive(remaining);

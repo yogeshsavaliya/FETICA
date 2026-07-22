@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.os.IBinder;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -26,6 +27,7 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
     private TunnelNotificationManager notificationManager;
     private TunnelConnectionManager connectionManager;
     private Handler mainHandler;
+    private PowerManager.WakeLock wakeLock;
 
     public static String getStatus() {
         return status;
@@ -56,6 +58,7 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
         super.onCreate();
         mainHandler = new Handler(Looper.getMainLooper());
         notificationManager = new TunnelNotificationManager(this);
+        acquireWakeLock();
         setStatus(TunnelStatus.DISCONNECTED);
         startForeground(
                 TunnelNotificationManager.NOTIFICATION_ID,
@@ -117,6 +120,7 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
             connectionManager.stop();
             connectionManager = null;
         }
+        releaseWakeLock();
         super.onDestroy();
     }
 
@@ -153,6 +157,7 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
             @Override
             public void run() {
                 stopForeground(true);
+                releaseWakeLock();
                 stopSelf();
             }
         });
@@ -168,6 +173,7 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
         setLastError(message);
         updateNotification();
         stopForeground(true);
+        releaseWakeLock();
         stopSelf();
     }
 
@@ -181,7 +187,28 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
         setLastError("");
         updateNotification();
         stopForeground(true);
+        releaseWakeLock();
         stopSelf();
+    }
+
+    private void acquireWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            return;
+        }
+        PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+        if (powerManager == null) {
+            return;
+        }
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ProxyTunnel:ForegroundTunnel");
+        wakeLock.setReferenceCounted(false);
+        wakeLock.acquire();
+    }
+
+    private void releaseWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+        }
+        wakeLock = null;
     }
 
     private void updateNotification() {
