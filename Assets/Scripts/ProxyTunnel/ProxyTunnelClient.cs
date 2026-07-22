@@ -10,9 +10,9 @@ namespace ProxyTunnel
     {
         private const string BridgeClassName = "com.secureinfotech.proxytunnel.ProxyTunnelBridge";
 
-        public static bool StartTunnel(string host, int port, string token, bool useTls)
+        public static bool StartTunnel(string host, int port, string username, string password, bool useTls)
         {
-            string validationError = ValidateStartInput(host, port, token);
+            string validationError = ValidateStartInput(host, port, username, password);
             if (validationError != null)
             {
                 LastEditorError = validationError;
@@ -24,7 +24,7 @@ namespace ProxyTunnel
             using (AndroidJavaObject activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
             using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
             {
-                bridge.CallStatic("startTunnel", activity, host.Trim(), port, token, useTls);
+                bridge.CallStatic("startTunnel", activity, host.Trim(), port, username, password, useTls);
             }
             return true;
 #else
@@ -99,7 +99,7 @@ namespace ProxyTunnel
         private static string LastEditorError { get; set; } = string.Empty;
         private static ProxyTunnelStatus LastEditorStatus { get; set; } = ProxyTunnelStatus.Disconnected;
 
-        private static string ValidateStartInput(string host, int port, string token)
+        private static string ValidateStartInput(string host, int port, string username, string password)
         {
             if (string.IsNullOrWhiteSpace(host))
             {
@@ -109,13 +109,18 @@ namespace ProxyTunnel
             {
                 return "Gateway port must be between 1 and 65535.";
             }
-            if (string.IsNullOrEmpty(token))
+            if (string.IsNullOrEmpty(username))
             {
-                return "Authentication token is required.";
+                return "Username is required.";
             }
-            if (token.IndexOf('\n') >= 0 || token.IndexOf('\r') >= 0)
+            if (string.IsNullOrEmpty(password))
             {
-                return "Authentication token must not contain newline characters.";
+                return "Password is required.";
+            }
+            if (username.IndexOf('\n') >= 0 || username.IndexOf('\r') >= 0
+                || password.IndexOf('\n') >= 0 || password.IndexOf('\r') >= 0)
+            {
+                return "Username and password must not contain newline characters.";
             }
             return null;
         }

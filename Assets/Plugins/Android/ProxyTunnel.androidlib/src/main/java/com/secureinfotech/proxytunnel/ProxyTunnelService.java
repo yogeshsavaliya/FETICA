@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.os.IBinder;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -14,7 +15,8 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
 
     public static final String EXTRA_HOST = "host";
     public static final String EXTRA_PORT = "port";
-    public static final String EXTRA_TOKEN = "token";
+    public static final String EXTRA_USERNAME = "username";
+    public static final String EXTRA_PASSWORD = "password";
     public static final String EXTRA_USE_TLS = "useTls";
 
     private static final AtomicLong UPLOADED_BYTES = new AtomicLong();
@@ -25,6 +27,7 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
     private TunnelNotificationManager notificationManager;
     private TunnelConnectionManager connectionManager;
     private Handler mainHandler;
+    private PowerManager.WakeLock wakeLock;
 
     public static String getStatus() {
         return status;
@@ -55,6 +58,7 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
         super.onCreate();
         mainHandler = new Handler(Looper.getMainLooper());
         notificationManager = new TunnelNotificationManager(this);
+        acquireWakeLock();
         setStatus(TunnelStatus.DISCONNECTED);
         startForeground(
                 TunnelNotificationManager.NOTIFICATION_ID,
@@ -80,9 +84,10 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
 
         String host = intent.getStringExtra(EXTRA_HOST);
         int port = intent.getIntExtra(EXTRA_PORT, 0);
-        String token = intent.getStringExtra(EXTRA_TOKEN);
+        String username = intent.getStringExtra(EXTRA_USERNAME);
+        String password = intent.getStringExtra(EXTRA_PASSWORD);
         boolean useTls = intent.getBooleanExtra(EXTRA_USE_TLS, true);
-        String validationError = validateStartInput(host, port, token);
+        String validationError = validateStartInput(host, port, username, password);
         if (validationError != null) {
             stopForTerminalError(validationError);
             return START_NOT_STICKY;
@@ -99,7 +104,7 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
         if (connectionManager != null) {
             connectionManager.stop();
         }
-        connectionManager = new TunnelConnectionManager(getApplicationContext(), config, token, this);
+        connectionManager = new TunnelConnectionManager(getApplicationContext(), config, username, password, this);
         connectionManager.start();
         return START_NOT_STICKY;
     }
@@ -115,6 +120,7 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
             connectionManager.stop();
             connectionManager = null;
         }
+        releaseWakeLock();
         super.onDestroy();
     }
 
@@ -151,6 +157,7 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
             @Override
             public void run() {
                 stopForeground(true);
+                releaseWakeLock();
                 stopSelf();
             }
         });
@@ -166,6 +173,7 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
         setLastError(message);
         updateNotification();
         stopForeground(true);
+        releaseWakeLock();
         stopSelf();
     }
 
@@ -179,7 +187,28 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
         setLastError("");
         updateNotification();
         stopForeground(true);
+        releaseWakeLock();
         stopSelf();
+    }
+
+    private void acquireWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            return;
+        }
+        PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+        if (powerManager == null) {
+            return;
+        }
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ProxyTunnel:ForegroundTunnel");
+        wakeLock.setReferenceCounted(false);
+        wakeLock.acquire();
+    }
+
+    private void releaseWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+        }
+        wakeLock = null;
     }
 
     private void updateNotification() {
@@ -188,18 +217,22 @@ public final class ProxyTunnelService extends Service implements TunnelConnectio
         }
     }
 
-    private static String validateStartInput(String host, int port, String token) {
+    private static String validateStartInput(String host, int port, String username, String password) {
         if (host == null || host.trim().length() == 0) {
             return "Gateway host is required.";
         }
         if (port < 1 || port > 65535) {
             return "Gateway port must be between 1 and 65535.";
         }
-        if (token == null || token.length() == 0) {
-            return "Authentication token is required.";
+        if (username == null || username.length() == 0) {
+            return "Username is required.";
         }
-        if (token.indexOf('\n') >= 0 || token.indexOf('\r') >= 0) {
-            return "Authentication token must not contain newline characters.";
+        if (password == null || password.length() == 0) {
+            return "Password is required.";
+        }
+        if (username.indexOf('\n') >= 0 || username.indexOf('\r') >= 0
+                || password.indexOf('\n') >= 0 || password.indexOf('\r') >= 0) {
+            return "Username and password must not contain newline characters.";
         }
         return null;
     }

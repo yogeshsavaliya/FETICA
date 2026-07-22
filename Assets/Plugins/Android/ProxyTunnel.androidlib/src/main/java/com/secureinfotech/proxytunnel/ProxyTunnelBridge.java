@@ -15,12 +15,13 @@ public final class ProxyTunnelBridge {
     private ProxyTunnelBridge() {
     }
 
-    public static void startTunnel(Activity activity, String host, int port, String token, boolean useTls) {
+    public static void startTunnel(Activity activity, String host, int port,
+                                   String username, String password, boolean useTls) {
         if (activity == null) {
             ProxyTunnelService.setLastError("Unity activity is unavailable.");
             return;
         }
-        String validationError = validateInput(host, port, token);
+        String validationError = validateInput(host, port, username, password);
         if (validationError != null) {
             ProxyTunnelService.setLastError(validationError);
             return;
@@ -41,7 +42,8 @@ public final class ProxyTunnelBridge {
         intent.setAction(ProxyTunnelService.ACTION_START);
         intent.putExtra(ProxyTunnelService.EXTRA_HOST, host.trim());
         intent.putExtra(ProxyTunnelService.EXTRA_PORT, port);
-        intent.putExtra(ProxyTunnelService.EXTRA_TOKEN, token);
+        intent.putExtra(ProxyTunnelService.EXTRA_USERNAME, username);
+        intent.putExtra(ProxyTunnelService.EXTRA_PASSWORD, password);
         intent.putExtra(ProxyTunnelService.EXTRA_USE_TLS, useTls);
         startForegroundServiceCompat(context, intent);
     }
@@ -72,18 +74,21 @@ public final class ProxyTunnelBridge {
         return ProxyTunnelService.getLastError();
     }
 
-    private static String validateInput(String host, int port, String token) {
+    private static String validateInput(String host, int port, String username, String password) {
         if (host == null || host.trim().length() == 0) {
             return "Gateway host is required.";
         }
         if (port < 1 || port > 65535) {
             return "Gateway port must be between 1 and 65535.";
         }
-        if (token == null || token.length() == 0) {
-            return "Authentication token is required.";
+        if (username == null || username.length() == 0) {
+            return "Username is required.";
         }
-        if (containsLineBreak(token)) {
-            return "Authentication token must not contain newline characters.";
+        if (password == null || password.length() == 0) {
+            return "Password is required.";
+        }
+        if (containsLineBreak(username) || containsLineBreak(password)) {
+            return "Username and password must not contain newline characters.";
         }
         return null;
     }
