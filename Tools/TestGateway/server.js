@@ -105,8 +105,9 @@ function handleTunnelSocket(socket) {
     const rawLine = authBuffer.subarray(0, newlineIndex).toString("utf8");
     const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
     const remaining = authBuffer.subarray(newlineIndex + 1);
-    if (!isValidTunnelAuth(line)) {
-      console.log(`tunnel authentication failed: ${remote}`);
+    const authResult = validateTunnelAuth(line);
+    if (!authResult.ok) {
+      console.log(`tunnel authentication failed: ${remote} (${authResult.reason})`);
       socket.write("ERROR\n");
       socket.end();
       return;
@@ -116,6 +117,7 @@ function handleTunnelSocket(socket) {
     socket.setTimeout(TUNNEL_IDLE_TIMEOUT_MS);
     socket.setKeepAlive(true, 30_000);
     activeTunnel = new TunnelSession(socket, remote);
+    console.log(`reverse SOCKS tunnel ready: ${remote}`);
     if (remaining.length > 0) {
       activeTunnel.receive(remaining);
     }
@@ -408,14 +410,23 @@ function writeSocksReply(client, code) {
   client.write(Buffer.from([0x05, code, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
 }
 
-function isValidTunnelAuth(line) {
+function validateTunnelAuth(line) {
   const parts = line.split(" ");
   if (parts.length !== 3 || parts[0] !== "AUTH2") {
-    return false;
+    return { ok: false, reason: "expected AUTH2 username/password handshake" };
   }
-  const username = Buffer.from(parts[1], "base64").toString("utf8");
-  const password = Buffer.from(parts[2], "base64").toString("utf8");
-  return username === tunnelUsername && password === tunnelPassword;
+  let username;
+  let password;
+  try {
+    username = Buffer.from(parts[1], "base64").toString("utf8");
+    password = Buffer.from(parts[2], "base64").toString("utf8");
+  } catch (error) {
+    return { ok: false, reason: "invalid base64 credentials" };
+  }
+  if (username !== tunnelUsername || password !== tunnelPassword) {
+    return { ok: false, reason: "wrong username/password" };
+  }
+  return { ok: true, reason: "ok" };
 }
 
 function requireSecret(name) {
