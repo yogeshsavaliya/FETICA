@@ -127,6 +127,24 @@ username/password method selection and continues the normal auth flow. The serve
 SOCKS compatibility greeting sent to <client-ip>:<port>
 ```
 
+If that app still closes immediately, enable server-first mode explicitly:
+
+```bash
+SOCKS_SERVER_FIRST=1 \
+TUNNEL_USERNAME="user1" \
+TUNNEL_PASSWORD="strong-password" \
+TEST_GATEWAY_HOST=0.0.0.0 \
+SOCKS_HOST=0.0.0.0 \
+npm start
+```
+
+The server then sends the SOCKS5 username/password method selection as soon as a client
+connects and logs:
+
+```text
+SOCKS server-first compatibility greeting sent to <client-ip>:<port>
+```
+
 The gateway accepts SOCKS5 username/password CONNECT requests and HTTP CONNECT proxy
 requests, then forwards each CONNECT over the single authenticated Android tunnel as a
 framed stream. The Android device opens the final outbound destination TCP connection.

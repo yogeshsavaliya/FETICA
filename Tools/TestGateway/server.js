@@ -28,6 +28,7 @@ const tunnelUsername = requireSecret("TUNNEL_USERNAME");
 const tunnelPassword = requireSecret("TUNNEL_PASSWORD");
 const socksUsername = process.env.SOCKS_USERNAME || tunnelUsername;
 const socksPassword = process.env.SOCKS_PASSWORD || tunnelPassword;
+const socksServerFirst = process.env.SOCKS_SERVER_FIRST === "1";
 const tunnelHost = process.env.TEST_GATEWAY_HOST || DEFAULT_TUNNEL_HOST;
 const tunnelPort = parsePort(process.env.TEST_GATEWAY_PORT || String(DEFAULT_TUNNEL_PORT), "TEST_GATEWAY_PORT");
 const socksHost = process.env.SOCKS_HOST || DEFAULT_SOCKS_HOST;
@@ -71,6 +72,10 @@ function handleProxySocket(client) {
   const remote = `${client.remoteAddress}:${client.remotePort}`;
   client.setNoDelay(true);
   client.setTimeout(SOCKS_TIMEOUT_MS);
+  if (socksServerFirst && !isProxyTlsEnabled()) {
+    client.write(Buffer.from([0x05, 0x02]));
+    console.log(`SOCKS server-first compatibility greeting sent to ${remote}`);
+  }
   handleProxyClient(client, remote).catch((error) => {
     console.log(`socks client closed: ${remote} ${error.message}`);
     client.destroy();
@@ -302,6 +307,10 @@ class TunnelSession {
 async function handleProxyClient(client, remote) {
   const firstByte = await readExactlyOrNull(client, 1, PROXY_FIRST_BYTE_TIMEOUT_MS);
   if (!firstByte) {
+    if (socksServerFirst) {
+      await authenticateSocksClient(client);
+      return handleSocksConnectRequest(client, remote);
+    }
     console.log(`SOCKS compatibility greeting sent to ${remote}`);
     client.write(Buffer.from([0x05, 0x02]));
     await authenticateSocksClient(client);
@@ -327,7 +336,9 @@ async function handleSocksClient(client, remote, version) {
     client.write(Buffer.from([0x05, 0xff]));
     throw new Error("SOCKS username/password method required; client may be using no-auth or HTTP proxy mode");
   }
-  client.write(Buffer.from([0x05, 0x02]));
+  if (!socksServerFirst) {
+    client.write(Buffer.from([0x05, 0x02]));
+  }
   await authenticateSocksClient(client);
   return handleSocksConnectRequest(client, remote);
 }

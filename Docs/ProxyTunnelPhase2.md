@@ -221,6 +221,25 @@ continues the normal SOCKS auth flow. The gateway logs:
 SOCKS compatibility greeting sent to <client-ip>:<port>
 ```
 
+If the app closes immediately before that fallback runs, start the gateway with explicit
+server-first mode:
+
+```bash
+SOCKS_SERVER_FIRST=1 \
+TUNNEL_USERNAME="user1" \
+TUNNEL_PASSWORD="strong-password" \
+TEST_GATEWAY_HOST=0.0.0.0 \
+SOCKS_HOST=0.0.0.0 \
+npm start
+```
+
+The gateway then sends the SOCKS5 username/password method selection immediately when a
+client connects and logs:
+
+```text
+SOCKS server-first compatibility greeting sent to <client-ip>:<port>
+```
+
 The destination connection is opened from the Android device/network.
 
 ## Acceptance tests
