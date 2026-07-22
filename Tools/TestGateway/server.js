@@ -40,7 +40,7 @@ const socksServer = net.createServer((client) => {
   const remote = `${client.remoteAddress}:${client.remotePort}`;
   client.setNoDelay(true);
   client.setTimeout(SOCKS_TIMEOUT_MS);
-  handleSocksClient(client, remote).catch((error) => {
+  handleProxyClient(client, remote).catch((error) => {
     console.log(`socks client closed: ${remote} ${error.message}`);
     client.destroy();
   });
@@ -56,7 +56,7 @@ tunnelServer.listen(tunnelPort, tunnelHost, () => {
 });
 
 socksServer.listen(socksPort, socksHost, () => {
-  console.log(`authenticated SOCKS5 listener on ${socksHost}:${socksPort}`);
+  console.log(`authenticated SOCKS5/HTTP CONNECT listener on ${socksHost}:${socksPort}`);
   if (socksHost !== "127.0.0.1" && socksHost !== "::1") {
     console.log("WARNING: SOCKS listener is not loopback-only. Use only with strong credentials and firewall rules.");
   }
@@ -280,15 +280,24 @@ class TunnelSession {
   }
 }
 
-async function handleSocksClient(client, remote) {
-  const greeting = await readExactly(client, 2);
-  if (greeting[0] !== 0x05) {
+async function handleProxyClient(client, remote) {
+  const firstByte = await readExactly(client, 1);
+  if (firstByte[0] === 0x05) {
+    return handleSocksClient(client, remote, firstByte[0]);
+  }
+  client.unshift(firstByte);
+  return handleHttpConnectClient(client, remote);
+}
+
+async function handleSocksClient(client, remote, version) {
+  if (version !== 0x05) {
     throw new Error("unsupported SOCKS version");
   }
-  const methods = await readExactly(client, greeting[1]);
+  const methodCount = await readExactly(client, 1);
+  const methods = await readExactly(client, methodCount[0]);
   if (!methods.includes(0x02)) {
     client.write(Buffer.from([0x05, 0xff]));
-    throw new Error("SOCKS username/password method required");
+    throw new Error("SOCKS username/password method required; client may be using no-auth or HTTP proxy mode");
   }
   client.write(Buffer.from([0x05, 0x02]));
   await authenticateSocksClient(client);
@@ -299,15 +308,15 @@ async function handleSocksClient(client, remote) {
     throw new Error("only SOCKS CONNECT is supported");
   }
 
-  const address = await readSocksAddress(client, header[3]);
-  const portBuffer = await readExactly(client, 2);
-  const targetPort = portBuffer.readUInt16BE(0);
-  console.log(`SOCKS CONNECT ${address.host}:${targetPort} from ${remote}`);
-
   if (!activeTunnel) {
     writeSocksReply(client, 0x01);
     throw new Error("no active Android tunnel");
   }
+
+  const address = await readSocksAddress(client, header[3]);
+  const portBuffer = await readExactly(client, 2);
+  const targetPort = portBuffer.readUInt16BE(0);
+  console.log(`SOCKS CONNECT ${address.host}:${targetPort} from ${remote}`);
 
   const tunnel = activeTunnel;
   const streamId = await tunnel.openStream(client, address.host, targetPort);
@@ -323,6 +332,129 @@ async function handleSocksClient(client, remote) {
   client.on("close", () => tunnel.closeStream(streamId, true));
   client.on("error", () => tunnel.closeStream(streamId, true));
   client.on("timeout", () => tunnel.closeStream(streamId, true));
+}
+
+async function handleHttpConnectClient(client, remote) {
+  const request = await readHttpHeader(client, 8192);
+  const lines = request.header.toString("utf8").split(/\r?\n/);
+  const requestLine = lines.shift() || "";
+  const match = /^CONNECT\s+([^\s:]+):(\d+)\s+HTTP\/1\.[01]$/i.exec(requestLine);
+  if (!match) {
+    client.write("HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n");
+    throw new Error("HTTP proxy client did not send CONNECT; use SOCKS5 or HTTP CONNECT proxy mode");
+  }
+
+  const headers = parseHttpHeaders(lines);
+  if (!isValidHttpProxyAuth(headers["proxy-authorization"])) {
+    client.write("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"ProxyTunnel\"\r\nConnection: close\r\n\r\n");
+    throw new Error("HTTP CONNECT authentication failed");
+  }
+  if (!activeTunnel) {
+    client.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+    throw new Error("no active Android tunnel");
+  }
+
+  const targetHost = match[1];
+  const targetPort = Number.parseInt(match[2], 10);
+  if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) {
+    client.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+    throw new Error("invalid HTTP CONNECT target port");
+  }
+
+  console.log(`HTTP CONNECT ${targetHost}:${targetPort} from ${remote}`);
+  const tunnel = activeTunnel;
+  const streamId = await tunnel.openStream(client, targetHost, targetPort);
+  client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+  if (request.remaining.length > 0) {
+    tunnel.sendData(streamId, request.remaining);
+  }
+
+  client.on("data", (chunk) => {
+    try {
+      tunnel.sendData(streamId, chunk);
+    } catch (error) {
+      client.destroy();
+    }
+  });
+  client.on("close", () => tunnel.closeStream(streamId, true));
+  client.on("error", () => tunnel.closeStream(streamId, true));
+  client.on("timeout", () => tunnel.closeStream(streamId, true));
+}
+
+function parseHttpHeaders(lines) {
+  const headers = {};
+  for (const line of lines) {
+    const separator = line.indexOf(":");
+    if (separator <= 0) {
+      continue;
+    }
+    headers[line.slice(0, separator).trim().toLowerCase()] = line.slice(separator + 1).trim();
+  }
+  return headers;
+}
+
+function isValidHttpProxyAuth(value) {
+  if (!value) {
+    return false;
+  }
+  const match = /^Basic\s+(.+)$/i.exec(value);
+  if (!match) {
+    return false;
+  }
+  let decoded;
+  try {
+    decoded = Buffer.from(match[1], "base64").toString("utf8");
+  } catch (error) {
+    return false;
+  }
+  const separator = decoded.indexOf(":");
+  if (separator < 0) {
+    return false;
+  }
+  return decoded.slice(0, separator) === socksUsername && decoded.slice(separator + 1) === socksPassword;
+}
+
+function readHttpHeader(socket, maxLength) {
+  return new Promise((resolve, reject) => {
+    let buffer = Buffer.alloc(0);
+    function cleanup() {
+      socket.off("data", onData);
+      socket.off("close", onClose);
+      socket.off("error", onError);
+      socket.off("timeout", onTimeout);
+    }
+    function onData(chunk) {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (buffer.length > maxLength) {
+        cleanup();
+        reject(new Error("HTTP header too large"));
+        return;
+      }
+      const marker = buffer.indexOf("\r\n\r\n");
+      const alternateMarker = marker < 0 ? buffer.indexOf("\n\n") : -1;
+      const end = marker >= 0 ? marker + 4 : (alternateMarker >= 0 ? alternateMarker + 2 : -1);
+      if (end >= 0) {
+        cleanup();
+        resolve({ header: buffer.subarray(0, end), remaining: buffer.subarray(end) });
+      }
+    }
+    function onClose() {
+      cleanup();
+      reject(new Error("socket closed"));
+    }
+    function onError(error) {
+      cleanup();
+      reject(error);
+    }
+    function onTimeout() {
+      cleanup();
+      reject(new Error("socket timeout waiting for SOCKS5 or HTTP CONNECT handshake"));
+    }
+    socket.on("data", onData);
+    socket.on("close", onClose);
+    socket.on("error", onError);
+    socket.on("timeout", onTimeout);
+  });
 }
 
 async function authenticateSocksClient(client) {

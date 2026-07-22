@@ -7,7 +7,7 @@ foreground service.
 
 ```text
 SOCKS client anywhere allowed by firewall
-  -> authenticated SOCKS5 listener on gateway, default 127.0.0.1:1080
+  -> authenticated SOCKS5 / HTTP CONNECT listener on gateway, default 127.0.0.1:1080
   -> Node gateway stream multiplexer
   -> authenticated outbound Android tunnel, default 127.0.0.1:9090 for local tests
   -> Android foreground service
@@ -46,6 +46,8 @@ Credentials are not logged.
 Implemented:
 
 - SOCKS5 username/password CONNECT support on the gateway side.
+- HTTP CONNECT proxy support on the same gateway listener for clients/apps that do not
+  support SOCKS5.
 - One authenticated Android tunnel carrying multiple framed streams.
 - Gateway-to-Android `OPEN`, `DATA`, and `CLOSE` frames.
 - Android-side destination TCP connect and bidirectional relay.
@@ -98,7 +100,7 @@ Defaults:
 
 ```text
 tunnel listener: 127.0.0.1:9090
-SOCKS listener:  127.0.0.1:1080
+proxy listener:  127.0.0.1:1080
 ```
 
 ## Global run from any network
@@ -189,6 +191,15 @@ Global gateway:
 curl -x socks5h://user1:strong-password@your-server-domain:1080 https://example.com/
 ```
 
+If a Delhi phone/app only supports HTTP proxy mode, configure:
+
+```text
+HTTP Proxy Host: your-server-domain-or-ip
+HTTP Proxy Port: 1080
+Username: user1
+Password: strong-password
+```
+
 The destination connection is opened from the Android device/network.
 
 ## Acceptance tests
@@ -199,11 +210,13 @@ The destination connection is opened from the Android device/network.
 4. Wrong tunnel username/password terminates the service and does not retry aggressively.
 5. SOCKS client without username/password is rejected.
 6. SOCKS client with correct username/password can CONNECT through the Android tunnel.
-7. `curl -x socks5h://user:pass@127.0.0.1:1080 https://example.com/` succeeds while
+7. HTTP CONNECT client with correct username/password can CONNECT through the Android
+   tunnel.
+8. `curl -x socks5h://user:pass@127.0.0.1:1080 https://example.com/` succeeds while
    Android tunnel is connected.
-8. Multiple SOCKS CONNECT streams can run concurrently.
-9. Notification Stop closes all streams and the tunnel.
-10. Wi-Fi loss causes Reconnecting and closes active streams.
-11. Restored network reconnects the tunnel.
-12. No Android `VpnService` is declared.
-13. No Android listening socket is opened.
+9. Multiple CONNECT streams can run concurrently.
+10. Notification Stop closes all streams and the tunnel.
+11. Wi-Fi loss causes Reconnecting and closes active streams.
+12. Restored network reconnects the tunnel.
+13. No Android `VpnService` is declared.
+14. No Android listening socket is opened.

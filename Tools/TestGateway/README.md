@@ -30,7 +30,7 @@ Defaults:
 
 ```text
 tunnel listener: 127.0.0.1:9090
-SOCKS5 listener: 127.0.0.1:1080
+proxy listener:  127.0.0.1:1080
 ```
 
 ## Global / VPS run
@@ -89,9 +89,19 @@ For global SOCKS:
 curl -x socks5h://user1:strong-password@your-server-domain:1080 https://example.com/
 ```
 
-The gateway accepts SOCKS5 username/password CONNECT requests and forwards each CONNECT
-over the single authenticated Android tunnel as a framed stream. The Android device opens
-the final outbound destination TCP connection.
+If your Delhi phone/app only supports HTTP proxy, use the same host/port/credentials in
+HTTP proxy mode. The gateway accepts HTTP CONNECT on the same `1080` port:
+
+```text
+HTTP Proxy Host: your-server-domain-or-ip
+HTTP Proxy Port: 1080
+Username: user1
+Password: strong-password
+```
+
+The gateway accepts SOCKS5 username/password CONNECT requests and HTTP CONNECT proxy
+requests, then forwards each CONNECT over the single authenticated Android tunnel as a
+framed stream. The Android device opens the final outbound destination TCP connection.
 
 ## Security notes
 
