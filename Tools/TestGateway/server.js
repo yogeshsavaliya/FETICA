@@ -36,6 +36,7 @@ const socksPort = parsePort(process.env.SOCKS_PORT || String(DEFAULT_SOCKS_PORT)
 
 let activeTunnel = null;
 let nextStreamId = 1;
+const pendingBuffers = new WeakMap();
 
 const tunnelServer = createTunnelServer();
 const socksServer = createProxyServer();
@@ -75,6 +76,13 @@ function handleProxySocket(client) {
   if (socksServerFirst && !isProxyTlsEnabled()) {
     client.write(Buffer.from([0x05, 0x02]));
     console.log(`SOCKS server-first compatibility greeting sent to ${remote}`);
+    authenticateSocksClient(client)
+      .then(() => handleSocksConnectRequest(client, remote))
+      .catch((error) => {
+        console.log(`socks client closed: ${remote} ${error.message}`);
+        client.destroy();
+      });
+    return;
   }
   handleProxyClient(client, remote).catch((error) => {
     console.log(`socks client closed: ${remote} ${error.message}`);
@@ -322,7 +330,7 @@ async function handleProxyClient(client, remote) {
   if (firstByte[0] === 0x16 && !isProxyTlsEnabled()) {
     throw new Error("client appears to be using HTTPS/TLS proxy mode on a plain proxy listener; select SOCKS5/HTTP proxy or configure PROXY_TLS_CERT_PATH and PROXY_TLS_KEY_PATH");
   }
-  client.unshift(firstByte);
+  pushPending(client, firstByte);
   return handleHttpConnectClient(client, remote);
 }
 
@@ -458,7 +466,12 @@ function isValidHttpProxyAuth(value) {
 
 function readHttpHeader(socket, maxLength) {
   return new Promise((resolve, reject) => {
-    let buffer = Buffer.alloc(0);
+    let buffer = takePending(socket);
+    const existingEnd = findHttpHeaderEnd(buffer);
+    if (existingEnd >= 0) {
+      resolve({ header: buffer.subarray(0, existingEnd), remaining: buffer.subarray(existingEnd) });
+      return;
+    }
     function cleanup() {
       socket.off("data", onData);
       socket.off("close", onClose);
@@ -472,9 +485,7 @@ function readHttpHeader(socket, maxLength) {
         reject(new Error("HTTP header too large"));
         return;
       }
-      const marker = buffer.indexOf("\r\n\r\n");
-      const alternateMarker = marker < 0 ? buffer.indexOf("\n\n") : -1;
-      const end = marker >= 0 ? marker + 4 : (alternateMarker >= 0 ? alternateMarker + 2 : -1);
+      const end = findHttpHeaderEnd(buffer);
       if (end >= 0) {
         cleanup();
         resolve({ header: buffer.subarray(0, end), remaining: buffer.subarray(end) });
@@ -497,6 +508,15 @@ function readHttpHeader(socket, maxLength) {
     socket.on("error", onError);
     socket.on("timeout", onTimeout);
   });
+}
+
+function findHttpHeaderEnd(buffer) {
+  const marker = buffer.indexOf("\r\n\r\n");
+  if (marker >= 0) {
+    return marker + 4;
+  }
+  const alternateMarker = buffer.indexOf("\n\n");
+  return alternateMarker >= 0 ? alternateMarker + 2 : -1;
 }
 
 async function authenticateSocksClient(client) {
@@ -541,8 +561,14 @@ function readExactly(socket, length) {
   if (length === 0) {
     return Promise.resolve(Buffer.alloc(0));
   }
+  const initial = takePending(socket);
+  if (initial.length >= length) {
+    const needed = initial.subarray(0, length);
+    pushPending(socket, initial.subarray(length));
+    return Promise.resolve(needed);
+  }
   return new Promise((resolve, reject) => {
-    let buffer = Buffer.alloc(0);
+    let buffer = initial;
     function cleanup() {
       socket.off("data", onData);
       socket.off("close", onClose);
@@ -556,7 +582,7 @@ function readExactly(socket, length) {
         const needed = buffer.subarray(0, length);
         const rest = buffer.subarray(length);
         if (rest.length > 0) {
-          socket.unshift(rest);
+          pushPending(socket, rest);
         }
         resolve(needed);
       }
@@ -581,12 +607,18 @@ function readExactly(socket, length) {
 }
 
 function readExactlyOrNull(socket, length, timeoutMs) {
+  const initial = takePending(socket);
+  if (initial.length >= length) {
+    const needed = initial.subarray(0, length);
+    pushPending(socket, initial.subarray(length));
+    return Promise.resolve(needed);
+  }
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
       resolve(null);
     }, timeoutMs);
-    let buffer = Buffer.alloc(0);
+    let buffer = initial;
     function cleanup() {
       clearTimeout(timer);
       socket.off("data", onData);
@@ -601,7 +633,7 @@ function readExactlyOrNull(socket, length, timeoutMs) {
         const needed = buffer.subarray(0, length);
         const rest = buffer.subarray(length);
         if (rest.length > 0) {
-          socket.unshift(rest);
+          pushPending(socket, rest);
         }
         resolve(needed);
       }
@@ -623,6 +655,23 @@ function readExactlyOrNull(socket, length, timeoutMs) {
     socket.on("error", onError);
     socket.on("timeout", onTimeout);
   });
+}
+
+function pushPending(socket, buffer) {
+  if (!buffer || buffer.length === 0) {
+    return;
+  }
+  const existing = pendingBuffers.get(socket);
+  pendingBuffers.set(socket, existing ? Buffer.concat([existing, buffer]) : buffer);
+}
+
+function takePending(socket) {
+  const existing = pendingBuffers.get(socket);
+  if (!existing) {
+    return Buffer.alloc(0);
+  }
+  pendingBuffers.delete(socket);
+  return existing;
 }
 
 function writeSocksReply(client, code) {
