@@ -30,7 +30,7 @@ Defaults:
 
 ```text
 tunnel listener: 127.0.0.1:9090
-proxy listener:  127.0.0.1:1080
+proxy listener:  127.0.0.1:2227
 ```
 
 ## Global / VPS run
@@ -57,7 +57,7 @@ Open/firewall only the ports you need:
 
 ```text
 9090/tcp tunnel from Android app
-1080/tcp SOCKS5 clients, username/password protected
+2227/tcp SOCKS5 clients, username/password protected
 ```
 
 For production-like global testing, use TLS for the Android tunnel. Provide a certificate
@@ -88,28 +88,28 @@ PROXY_TLS_KEY_PATH=/etc/letsencrypt/live/example.com/privkey.pem \
 npm start
 ```
 
-Then configure the Delhi client as an HTTPS proxy using the same host and port `1080`.
+Then configure the Delhi client as an HTTPS proxy using the same host and port `2227`.
 
 ## Test with curl
 
 After the Android app connects to the tunnel:
 
 ```bash
-curl -x socks5h://user1:strong-password@127.0.0.1:1080 https://example.com/
+curl -x socks5h://user1:strong-password@127.0.0.1:2227 https://example.com/
 ```
 
 For global SOCKS:
 
 ```bash
-curl -x socks5h://user1:strong-password@your-server-domain:1080 https://example.com/
+curl -x socks5h://user1:strong-password@your-server-domain:2227 https://example.com/
 ```
 
 If your Delhi phone/app only supports HTTP proxy, use the same host/port/credentials in
-HTTP proxy mode. The gateway accepts HTTP CONNECT on the same `1080` port:
+HTTP proxy mode. The gateway accepts HTTP CONNECT on the same `2227` port:
 
 ```text
 HTTP Proxy Host: your-server-domain-or-ip
-HTTP Proxy Port: 1080
+HTTP Proxy Port: 2227
 Username: user1
 Password: strong-password
 ```

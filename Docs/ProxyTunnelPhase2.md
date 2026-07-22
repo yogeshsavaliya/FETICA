@@ -7,7 +7,7 @@ foreground service.
 
 ```text
 SOCKS client anywhere allowed by firewall
-  -> authenticated SOCKS5 / HTTP CONNECT listener on gateway, default 127.0.0.1:1080
+  -> authenticated SOCKS5 / HTTP CONNECT listener on gateway, default 127.0.0.1:2227
   -> Node gateway stream multiplexer
   -> authenticated outbound Android tunnel, default 127.0.0.1:9090 for local tests
   -> Android foreground service
@@ -100,7 +100,7 @@ Defaults:
 
 ```text
 tunnel listener: 127.0.0.1:9090
-proxy listener:  127.0.0.1:1080
+proxy listener:  127.0.0.1:2227
 ```
 
 ## Global run from any network
@@ -182,20 +182,20 @@ Use TLS: off for this plain TCP test
 Local gateway machine:
 
 ```bash
-curl -x socks5h://user1:strong-password@127.0.0.1:1080 https://example.com/
+curl -x socks5h://user1:strong-password@127.0.0.1:2227 https://example.com/
 ```
 
 Global gateway:
 
 ```bash
-curl -x socks5h://user1:strong-password@your-server-domain:1080 https://example.com/
+curl -x socks5h://user1:strong-password@your-server-domain:2227 https://example.com/
 ```
 
 If a Delhi phone/app only supports HTTP proxy mode, configure:
 
 ```text
 HTTP Proxy Host: your-server-domain-or-ip
-HTTP Proxy Port: 1080
+HTTP Proxy Port: 2227
 Username: user1
 Password: strong-password
 ```
@@ -208,7 +208,7 @@ PROXY_TLS_KEY_PATH=/etc/letsencrypt/live/example.com/privkey.pem \
 npm start
 ```
 
-Then set the Delhi client to HTTPS proxy mode on port `1080`. If an HTTPS-proxy client is
+Then set the Delhi client to HTTPS proxy mode on port `2227`. If an HTTPS-proxy client is
 sent to a plain proxy listener, the gateway logs that the client is using TLS on a plain
 proxy port.
 
@@ -233,7 +233,7 @@ The destination connection is opened from the Android device/network.
 6. SOCKS client with correct username/password can CONNECT through the Android tunnel.
 7. HTTP CONNECT client with correct username/password can CONNECT through the Android
    tunnel.
-8. `curl -x socks5h://user:pass@127.0.0.1:1080 https://example.com/` succeeds while
+8. `curl -x socks5h://user:pass@127.0.0.1:2227 https://example.com/` succeeds while
    Android tunnel is connected.
 9. Multiple CONNECT streams can run concurrently.
 10. Notification Stop closes all streams and the tunnel.
